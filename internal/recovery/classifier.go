@@ -38,8 +38,11 @@ type ClassificationResult struct {
 // The rules are deliberately conservative and code-defined (no user policy
 // DSL yet — that arrives with the policy engine):
 //
+//   - An explicit application header (x-duplicate-of) marking the message as
+//     a duplicate is DO_NOT_REPLAY — the strongest signal, because the
+//     application itself is telling us replay would duplicate work.
 //   - Failure text that signals a duplicate (already processed, idempotency
-//     hit) is DO_NOT_REPLAY — replaying would duplicate work.
+//     hit) is DO_NOT_REPLAY for the same reason.
 //   - Transient-sounding failures (timeouts, connection resets, 5xx,
 //     throttling) are REPLAYABLE — unless the retry count is already high,
 //     which suggests the "transient" cause is actually persistent.
@@ -48,13 +51,24 @@ type ClassificationResult struct {
 //     correction, not another attempt.
 //   - Missing or conflicting signals default to INVESTIGATE.
 func Classify(m *message.Message) ClassificationResult {
+	res := ClassificationResult{MessageID: m.ID}
+
+	// Application-provided duplicate evidence: the producer marks the message
+	// as a duplicate of another event it already emitted. This is an explicit
+	// signal, so it outranks anything inferred from the failure text.
+	if of := m.Headers["x-duplicate-of"]; of != "" {
+		res.Classification = DoNotReplay
+		res.Reason = "message header x-duplicate-of marks it as a duplicate of " + of
+		res.Confidence = 0.9
+		res.DuplicateOf = &of
+		return res
+	}
+
 	reason := strings.ToLower(m.FailureReason)
 
 	dup := hasAny(reason, dupKeywords)
 	transient := hasAny(reason, transientKeywords)
 	permanent := hasAny(reason, permanentKeywords)
-
-	res := ClassificationResult{MessageID: m.ID}
 
 	switch {
 	case dup:

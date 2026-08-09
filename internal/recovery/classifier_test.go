@@ -99,6 +99,35 @@ func TestClassify(t *testing.T) {
 	}
 }
 
+func TestClassifyHeaderDuplicateSignal(t *testing.T) {
+	// An explicit x-duplicate-of header is the strongest signal: it outranks
+	// a transient-looking failure text and wins even when the broker reason
+	// would normally classify the message as REPLAYABLE/REQUIRES_FIX.
+	reasons := []string{"", "rejected", "timeout connecting to 10.0.4.5:6432"}
+	for _, reason := range reasons {
+		res := Classify(&message.Message{
+			ID:            "m-dup",
+			FailureReason: reason,
+			Headers:       map[string]string{"x-duplicate-of": "evt_42"},
+		})
+		if res.Classification != DoNotReplay {
+			t.Errorf("reason %q: got %s, want DO_NOT_REPLAY", reason, res.Classification)
+		}
+		if res.DuplicateOf == nil || *res.DuplicateOf != "evt_42" {
+			t.Errorf("reason %q: DuplicateOf = %v, want evt_42", reason, res.DuplicateOf)
+		}
+	}
+}
+
+func TestClassifyWithoutHeaderStillUsesTextSignals(t *testing.T) {
+	// The header must not change classification when absent: the same failure
+	// text without the header keeps its normal classification.
+	res := Classify(&message.Message{ID: "m1", FailureReason: "timeout"})
+	if res.Classification != Replayable {
+		t.Errorf("got %s, want REPLAYABLE", res.Classification)
+	}
+}
+
 func TestClassifyInvestigateIsDefault(t *testing.T) {
 	// The honest-default contract: anything ambiguous lands on INVESTIGATE,
 	// never on REPLAYABLE by assumption.
