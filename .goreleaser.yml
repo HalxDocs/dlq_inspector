@@ -1,0 +1,58 @@
+# Goreleaser configuration for DLQ Inspector.
+#
+# One static binary per platform — modernc.org/sqlite (the audit store) is
+# cgo-free, so CGO_ENABLED=0 builds work everywhere and the binary has no
+# runtime dependencies beyond the OS.
+#
+# Version metadata is injected via -X main.{version,commit,date}, the same
+# variables cmd/dlq/main.go prints in `dlq version`.
+version: 2
+
+project_name: dlq-inspector
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: dlq
+    main: ./cmd/dlq
+    binary: dlq
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .ShortCommit }}
+      - -X main.date={{ .Date }}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: dlq
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .OS }}_{{ .Arch }}
+    # The binary alone; no README/LICENSE duplication inside the archive.
+    files:
+      - none*
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
