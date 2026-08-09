@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/HalxDocs/dlq_inspector/internal/message"
+	"github.com/HalxDocs/dlq_inspector/internal/policy"
 )
 
 // FailureGroup clusters messages that failed the same way: they share a
@@ -60,10 +61,14 @@ type groupKey struct {
 
 // Analyzer groups a set of failed messages into failure patterns. It is
 // broker-agnostic: it only reads message.Message.
-type Analyzer struct{}
+type Analyzer struct {
+	// Policy, when set, is consulted for every message: a matching rule's
+	// action overrides the classifier inference for that message.
+	Policy *policy.Policy
+}
 
 // Analyze clusters msgs into FailureGroups ordered by size (largest first).
-func (Analyzer) Analyze(msgs []message.Message) []FailureGroup {
+func (a Analyzer) Analyze(msgs []message.Message) []FailureGroup {
 	total := len(msgs)
 	if total == 0 {
 		return nil
@@ -78,6 +83,7 @@ func (Analyzer) Analyze(msgs []message.Message) []FailureGroup {
 		last     time.Time
 		shape    string
 	}
+	pol := a.Policy // captured before the accumulator shadows the receiver
 	groups := make(map[groupKey]*acc)
 	for i := range msgs {
 		m := &msgs[i]
@@ -98,7 +104,7 @@ func (Analyzer) Analyze(msgs []message.Message) []FailureGroup {
 		}
 		a.ids = append(a.ids, m.ID)
 
-		res := Classify(m)
+		res := ClassifyWithPolicy(m, pol)
 		a.classCnt[res.Classification]++
 		a.confSum[res.Classification] += res.Confidence
 

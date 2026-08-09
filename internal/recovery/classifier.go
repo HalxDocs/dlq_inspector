@@ -1,9 +1,11 @@
 package recovery
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/HalxDocs/dlq_inspector/internal/message"
+	"github.com/HalxDocs/dlq_inspector/internal/policy"
 )
 
 // Classification is the recovery category assigned to a failed message.
@@ -113,6 +115,47 @@ func Classify(m *message.Message) ClassificationResult {
 		res.Confidence = 0.5
 		return res
 	}
+}
+
+// ClassifyWithPolicy runs the rule-based classifier, then lets a loaded
+// policy override the inference: the first matching rule's action replaces
+// the classification (with the rule named in the reason). Two things keep
+// the gate honest:
+//
+//   - A per-message x-duplicate-of header outranks policy. That header is
+//     the application speaking about THIS message ("it is a duplicate of
+//     evt_X"); a general policy rule cannot know that, so it must never
+//     force a replay.
+//   - A rule whose params are not satisfied (too many retries, missing
+//     idempotency key) does not apply and the classifier inference stands.
+func ClassifyWithPolicy(m *message.Message, p *policy.Policy) ClassificationResult {
+	res := Classify(m)
+	if m == nil || p == nil {
+		return res
+	}
+	if m.Headers["x-duplicate-of"] != "" {
+		return res
+	}
+	rule, ok := p.Match(m)
+	if !ok {
+		return res
+	}
+
+	var cls Classification
+	switch rule.Action {
+	case policy.ActionReplay:
+		cls = Replayable
+	case policy.ActionRequireFix:
+		cls = RequiresFix
+	case policy.ActionDoNotReplay:
+		cls = DoNotReplay
+	default:
+		return res // unreachable: policy.Parse validates actions
+	}
+	res.Classification = cls
+	res.Reason = fmt.Sprintf("policy rule %q: %s", rule.When, rule.Action)
+	res.Confidence = 0.9
+	return res
 }
 
 // highRetry is the retry count beyond which a transient-looking failure is

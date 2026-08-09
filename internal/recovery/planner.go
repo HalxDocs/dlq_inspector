@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/HalxDocs/dlq_inspector/internal/message"
+	"github.com/HalxDocs/dlq_inspector/internal/policy"
 )
 
 // PlanLimits constrain how a plan executes (Phase 6). They are recorded on
@@ -101,6 +102,10 @@ type PlanOptions struct {
 	// selection. The default is to exclude them — replaying them risks
 	// duplicates or harm.
 	IncludeDoNotReplay bool
+	// Policy, when set, is consulted for every message: a matching rule's
+	// action overrides the classifier inference (e.g. a policy can mark a
+	// message DO_NOT_REPLAY and keep it out of the plan).
+	Policy *policy.Policy
 }
 
 // BuildPlan turns a set of failed messages into a RecoveryPlan. Selection
@@ -130,7 +135,7 @@ func BuildPlan(msgs []message.Message, opts PlanOptions) (*RecoveryPlan, error) 
 		if opts.GroupID != "" && groupID(sig) != opts.GroupID {
 			continue
 		}
-		cls := Classify(m)
+		cls := ClassifyWithPolicy(m, opts.Policy)
 		if !opts.IncludeDoNotReplay && cls.Classification == DoNotReplay {
 			excluded = append(excluded, ExcludedMessage{
 				MessageID:      m.ID,
