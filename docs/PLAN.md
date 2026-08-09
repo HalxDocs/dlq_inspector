@@ -344,6 +344,15 @@ interface + pass conformance, no engine changes.
   README, `docs/ARCHITECTURE.md`, `docs/COMMANDS.md`, `docs/POLICIES.md`.
 - Golden-file CLI test suite in CI (analyze/plan/recover --dry-run snapshots).
 
+**Done so far:** `.goreleaser.yml` (one static binary per platform, CGO_ENABLED=0,
+`-trimpath`, `-X main.{version,commit,date}` ldflags) with the release build verified
+locally (`dlq version` reports the injected metadata; `go version -m` shows
+modernc.org/sqlite embedded); README quickstart rewritten for the shipped CLI;
+`docs/COMMANDS.md` written as the full command reference.
+
+**Remaining:** `docs/ARCHITECTURE.md`, `docs/POLICIES.md`, and the golden-file CLI
+suite (analyze/plan/recover --dry-run snapshots) in CI.
+
 **Post-1.0 adoption features (in priority order):**
 1. Interactive TUI (`dlq tui`) — k9s-style browsing + one-keystroke replay; the biggest
    adoption driver.
