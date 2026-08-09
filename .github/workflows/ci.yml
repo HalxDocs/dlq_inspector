@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      rabbitmq:
+        image: rabbitmq:3.13-management
+        ports:
+          - 5672:5672
+          - 15672:15672
+
+    env:
+      # Dual-mode test hooks: unit and safety tests never need these, and the
+      # conformance suite skips when they are absent, but CI provides a real
+      # broker so the full integration surface runs on every push.
+      DLQ_TEST_AMQP_URL: amqp://guest:guest@localhost:5672/
+      DLQ_TEST_MANAGEMENT_URL: http://guest:guest@localhost:15672/
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+
+      - name: Format check
+        run: test -z "$(gofmt -l .)"
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
