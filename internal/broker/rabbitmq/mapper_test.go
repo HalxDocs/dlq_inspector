@@ -132,6 +132,35 @@ func TestDeathInfoMissing(t *testing.T) {
 	}
 }
 
+// TestToMessageDestinationFallback pins the rollback round-trip: a restored
+// DLQ entry has no x-death (dead-letter bookkeeping is stripped on republish)
+// but carries the original replay destination as an x-destination header, and
+// the mapper must resolve it so a future plan can replay the message again.
+func TestToMessageDestinationFallback(t *testing.T) {
+	m := toMessage(amqp.Delivery{
+		Headers: amqp.Table{"x-destination": "orders"},
+		Body:    []byte(`{"order_id":1}`),
+	}, "orders-dlq")
+
+	if m.Destination != "orders" {
+		t.Errorf("Destination = %q, want the x-destination fallback", m.Destination)
+	}
+}
+
+func TestToMessageDestinationPrefersXDeath(t *testing.T) {
+	// A real dead-lettered message has both x-death and (possibly) a stale
+	// x-destination; x-death must win.
+	m := toMessage(amqp.Delivery{
+		Headers: amqp.Table{
+			"x-death":       []interface{}{amqp.Table{"queue": "orders-v2", "reason": "rejected", "count": int64(1)}},
+			"x-destination": "orders",
+		},
+	}, "orders-dlq")
+	if m.Destination != "orders-v2" {
+		t.Errorf("Destination = %q, want x-death to win", m.Destination)
+	}
+}
+
 func TestNormalizeHeaders(t *testing.T) {
 	ts := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	tbl := amqp.Table{

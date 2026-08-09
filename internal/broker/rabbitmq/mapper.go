@@ -20,6 +20,12 @@ import (
 func toMessage(d amqp.Delivery, queue string) message.Message {
 	headers := normalizeHeaders(d.Headers)
 	destination, retries, reason := deathInfo(d.Headers)
+	// Rollback-restored DLQ entries carry the original replay destination as
+	// an x-destination header (they have no x-death — it is stripped on
+	// republish), so a future plan can still replay them.
+	if destination == "" {
+		destination = headers["x-destination"]
+	}
 	eventID, idemKey := extractIDs(headers)
 
 	return message.Message{

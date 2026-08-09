@@ -32,6 +32,9 @@ type valBroker struct {
 	missingQueues map[string]bool
 	// statsErr, when set, is returned by Stats for every queue.
 	statsErr error
+	// publishedDests / publishedMsgs record every Publish call in lockstep.
+	publishedDests []string
+	publishedMsgs  []message.Message
 }
 
 func (b *valBroker) Connect(ctx context.Context, cfg broker.ConnectionConfig) error { return nil }
@@ -61,6 +64,8 @@ func (b *valBroker) Publish(ctx context.Context, dest string, m *message.Message
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.publishes++
+	b.publishedDests = append(b.publishedDests, dest)
+	b.publishedMsgs = append(b.publishedMsgs, *m)
 	if n := b.failPublish[m.ID]; n > 0 {
 		b.failPublish[m.ID] = n - 1
 		return fmt.Errorf("publish failed for %s", m.ID)
