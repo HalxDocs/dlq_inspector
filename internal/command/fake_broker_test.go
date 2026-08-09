@@ -40,6 +40,7 @@ type fakeBroker struct {
 type publishCall struct {
 	destination string
 	id          string
+	payload     string
 }
 
 // ackCall records one Ack invocation.
@@ -84,7 +85,7 @@ func (f *fakeBroker) Search(ctx context.Context, queue string, flt broker.Search
 func (f *fakeBroker) Publish(ctx context.Context, destination string, msg *message.Message) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.published = append(f.published, publishCall{destination: destination, id: msg.ID})
+	f.published = append(f.published, publishCall{destination: destination, id: msg.ID, payload: string(msg.Payload)})
 	return f.publishErr
 }
 

@@ -252,17 +252,24 @@ acking; history query returns the full plan trail.
 
 **Outcome:** fix messages before replaying them.
 
-**Exit gate:**
-- `dlq patch <id> --set customer_id=443` renders an old→new payload diff
-  (`internal/patch/diff`), requires confirmation, writes the diff to the audit entry.
+**Exit gate (done):**
+- `dlq patch <queue> --id <id> --set customer_id=443` renders an old→new payload diff
+  (`internal/patch/diff`) and, with `--confirm`, replays the patched message. The
+  dry-run prints the diff + safety checks + `Changes made: NONE`; the diff is written
+  to the audit entry (`payload_diff` column, with a migration for older stores).
 - Patched replay flows through the **same** safety pipeline as unpatched replay
-  (dry-run → diff → confirm → execute → audit).
-- `--set` supports dotted field paths and JSON values.
+  (dry-run → diff → confirm → execute → audit) via the shared `safety` gate, which
+  carries the payload override, diff, and audit action.
+- `--set` supports dotted field paths (`billing.address.city`, `items.0.sku`) and JSON
+  values (`443`, `true`, `["a","b"]`); non-JSON values become strings. A `--set` that
+  produces no change is refused.
 
 **Packages:** `internal/patch` (patch, diff), `internal/command/patch.go`.
 
 **Tests:** diff rendering (added/removed/changed paths), patch application on nested
-objects, patched-replay safety path, diff persisted in audit.
+objects and arrays, patched-replay safety path (publish patched payload, ack only
+after publish, refusal on missing destination), diff persisted in audit and rendered
+by `dlq history`.
 
 ---
 

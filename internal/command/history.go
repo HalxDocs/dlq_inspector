@@ -73,25 +73,44 @@ outcome in execution order plus the plan-level summary.`,
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
 			fmt.Fprintln(tw, "TIMESTAMP\tACTION\tMESSAGE\tQUEUE\tDESTINATION\tCONFIRMED\tRESULT\tREASON")
 			for _, e := range entries {
-				msg := e.MessageID
-				if msg == "" {
-					msg = "(plan)"
-				}
 				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%t\t%s\t%s\n",
 					e.Timestamp.Format(time.RFC3339),
 					e.Action,
-					msg,
+					entryLabel(e),
 					e.SourceQueue,
 					e.Destination,
 					e.Confirmed,
 					e.Result,
 					e.Reason)
 			}
-			return tw.Flush()
+			if err := tw.Flush(); err != nil {
+				return err
+			}
+
+			// Diffs are multi-line and would garble the table; show them as
+			// blocks underneath so a patched replay's exact change is visible.
+			for _, e := range entries {
+				if e.PayloadDiff == "" {
+					continue
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "\nPayload diff for %s (%s, %s):\n",
+					entryLabel(e), e.Result, e.Timestamp.Format(time.RFC3339))
+				fmt.Fprintln(cmd.OutOrStdout(), e.PayloadDiff)
+			}
+			return nil
 		},
 	}
 
 	cmd.Flags().IntVar(&limit, "limit", 20, "maximum number of entries to list")
 	cmd.Flags().StringVar(&planID, "plan", "", "show the full trail for this plan ID")
 	return cmd
+}
+
+// entryLabel is the message shown for an entry in history tables: the message
+// ID, or "(plan)" for plan-level entries.
+func entryLabel(e audit.Entry) string {
+	if e.MessageID == "" {
+		return "(plan)"
+	}
+	return e.MessageID
 }

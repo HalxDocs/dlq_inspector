@@ -61,6 +61,7 @@ Workflow: Inspect -> Analyze -> Classify -> Plan -> Validate -> Dry-run -> Recov
 		newInspectCmd(opts),
 		newSearchCmd(opts),
 		newReplayCmd(opts),
+		newPatchCmd(opts),
 		newHistoryCmd(opts),
 		newAnalyzeCmd(opts),
 		newPlanCmd(opts),

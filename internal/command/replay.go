@@ -73,7 +73,7 @@ removed from the DLQ, and every outcome is written to the local audit trail.`,
 
 			if confirm {
 				if !yes && stdinIsTerminal() {
-					ok, err := promptReplay(cmd, id, queue)
+					ok, err := promptConfirm(cmd, fmt.Sprintf("Replay message %s from %s? [y/N] ", id, queue))
 					if err != nil {
 						return err
 					}
@@ -99,7 +99,7 @@ removed from the DLQ, and every outcome is written to the local audit trail.`,
 			if err != nil {
 				return err
 			}
-			return renderReplayPreview(cmd, preview)
+			return renderReplayPreview(cmd, preview, "")
 		},
 	}
 
@@ -145,10 +145,10 @@ func stdinIsTerminal() bool {
 	return term.IsTerminal(int(os.Stdin.Fd()))
 }
 
-// promptReplay asks the operator to confirm the replay, returning false when
-// they decline.
-func promptReplay(cmd *cobra.Command, id, queue string) (bool, error) {
-	fmt.Fprintf(cmd.OutOrStdout(), "Replay message %s from %s? [y/N] ", id, queue)
+// promptConfirm asks the operator to confirm an operation, returning false
+// when they decline.
+func promptConfirm(cmd *cobra.Command, prompt string) (bool, error) {
+	fmt.Fprint(cmd.OutOrStdout(), prompt)
 	reader := bufio.NewReader(os.Stdin)
 	line, err := reader.ReadString('\n')
 	if err != nil {
@@ -158,8 +158,9 @@ func promptReplay(cmd *cobra.Command, id, queue string) (bool, error) {
 }
 
 // renderReplayPreview prints the dry-run preview: what would happen, the
-// safety checks that passed, any warnings, and the changes-made: NONE line.
-func renderReplayPreview(cmd *cobra.Command, p *safety.Preview) error {
+// safety checks that passed, the payload diff for patched replays, any
+// warnings, and the changes-made: NONE line.
+func renderReplayPreview(cmd *cobra.Command, p *safety.Preview, diff string) error {
 	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
 	fmt.Fprintf(tw, "Message:\t%s\n", p.Message.ID)
 	fmt.Fprintf(tw, "Queue:\t%s\n", p.Message.Queue)
@@ -175,6 +176,11 @@ func renderReplayPreview(cmd *cobra.Command, p *safety.Preview) error {
 	fmt.Fprintln(cmd.OutOrStdout(), "\nSafety checks:")
 	for _, c := range p.SafetyChecks {
 		fmt.Fprintf(cmd.OutOrStdout(), "  [ok] %s\n", c)
+	}
+
+	if diff != "" {
+		fmt.Fprintln(cmd.OutOrStdout(), "\nPayload diff:")
+		fmt.Fprintln(cmd.OutOrStdout(), diff)
 	}
 
 	if p.Duplicate.MatchFound {
