@@ -13,6 +13,7 @@ import (
 
 	"github.com/HalxDocs/dlq_inspector/internal/audit"
 	"github.com/HalxDocs/dlq_inspector/internal/broker"
+	"github.com/HalxDocs/dlq_inspector/internal/message"
 )
 
 // DefaultFailureThreshold is the failure rate inside a batch that trips the
@@ -297,8 +298,33 @@ func (e Executor) process(ctx context.Context, plan *RecoveryPlan, id string, op
 		return outcome{state: "ack_failed"}
 	}
 
+	// Snapshot the message exactly as it was replayed, so a bad recovery can
+	// be rolled back: rollback republishes the snapshot to the DLQ. Only
+	// successful replays are snapshotted — a message left in the DLQ needs no
+	// snapshot to be recovered again.
+	e.snapshot(plan, m, opts)
+
 	e.audit(plan, id, "success", opts, "")
 	return outcome{state: "replayed"}
+}
+
+// snapshot records the replayed message in the audit store. Best-effort like
+// the audit writes: the replay has already happened at this point, so a local
+// storage failure must not misreport the recovery outcome.
+func (e Executor) snapshot(plan *RecoveryPlan, m *message.Message, opts ExecutorOptions) {
+	if e.Audit == nil {
+		return
+	}
+	_ = e.Audit.SaveSnapshot(audit.Snapshot{
+		PlanID:      plan.ID,
+		MessageID:   m.ID,
+		SourceQueue: plan.Queue,
+		Destination: plan.Destination,
+		Payload:     m.Payload,
+		ContentType: m.ContentType,
+		Headers:     m.Headers,
+		Timestamp:   time.Now().UTC(),
+	})
 }
 
 // filterCompleted drops messages that already have a successful replay in the

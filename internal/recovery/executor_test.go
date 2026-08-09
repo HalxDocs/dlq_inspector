@@ -80,6 +80,50 @@ func TestExecuteReplaysAllAndAudits(t *testing.T) {
 	}
 }
 
+func TestExecuteSnapshotsReplayedMessages(t *testing.T) {
+	store := execStore(t)
+	// m1 and m3 replay; m2 always fails to publish, so it must NOT be
+	// snapshotted (its DLQ copy stays in place and needs no rollback).
+	b := &valBroker{
+		msgs:        map[string][]message.Message{"orders-dlq": execMsgs("m1", "m2", "m3")},
+		failPublish: map[string]int{"m2": 5},
+	}
+	ex := Executor{Broker: b, Audit: store}
+
+	res, err := ex.Execute(context.Background(), execPlan("m1", "m2", "m3"), ExecutorOptions{
+		Confirm: true, BatchSize: 3, RateLimit: "0", Concurrency: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Replayed != 2 || res.Failed != 1 {
+		t.Fatalf("result = %+v, want 2 replayed and 1 failed", res)
+	}
+
+	snaps, err := store.Snapshots("plan_exec")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snaps) != 2 {
+		t.Fatalf("snapshots = %d, want 2 (replayed only)\n%+v", len(snaps), snaps)
+	}
+	if snaps[0].MessageID != "m1" || snaps[1].MessageID != "m3" {
+		t.Errorf("snapshot order = %s, %s; want m1, m3", snaps[0].MessageID, snaps[1].MessageID)
+	}
+	have := snaps[0]
+	if have.SourceQueue != "orders-dlq" || have.Destination != "orders" || string(have.Payload) != "{}" {
+		t.Errorf("snapshot = %+v, want the DLQ/destination/payload recorded", have)
+	}
+	if have.PlanID != "plan_exec" || have.Timestamp.IsZero() {
+		t.Errorf("snapshot metadata = %+v", have)
+	}
+	for _, sn := range snaps {
+		if sn.MessageID == "m2" {
+			t.Errorf("m2 was snapshotted despite failing to publish: %+v", sn)
+		}
+	}
+}
+
 func TestExecuteRefusesWithoutConfirm(t *testing.T) {
 	b := &valBroker{msgs: map[string][]message.Message{"orders-dlq": execMsgs("m1")}}
 	_, err := (Executor{Broker: b}).Execute(context.Background(), execPlan("m1"), ExecutorOptions{})
