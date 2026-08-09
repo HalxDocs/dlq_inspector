@@ -79,7 +79,7 @@ no message is published, acked, or moved.`,
 func renderAnalyze(cmd *cobra.Command, queue string, total int, groups []recovery.FailureGroup) error {
 	fmt.Fprintf(cmd.OutOrStdout(), "%d messages analyzed in %s\n", total, queue)
 	for i, g := range groups {
-		fmt.Fprintf(cmd.OutOrStdout(), "\nGROUP %d -- %s\n", i+1, g.Label)
+		fmt.Fprintf(cmd.OutOrStdout(), "\nGROUP %d -- %s [%s]\n", i+1, g.Label, g.ID)
 		fmt.Fprintf(cmd.OutOrStdout(), "%d messages - %.1f%%\n", g.Count, g.Percentage)
 		fmt.Fprintf(cmd.OutOrStdout(), "Recommendation: %s (confidence %.2f)\n", g.Recommendation, g.Confidence)
 

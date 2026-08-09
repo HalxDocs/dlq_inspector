@@ -63,6 +63,8 @@ Workflow: Inspect -> Analyze -> Classify -> Plan -> Validate -> Dry-run -> Recov
 		newReplayCmd(opts),
 		newHistoryCmd(opts),
 		newAnalyzeCmd(opts),
+		newPlanCmd(opts),
+		newRecoverCmd(opts),
 	)
 
 	return root
