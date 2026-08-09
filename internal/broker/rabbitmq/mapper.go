@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -47,6 +48,14 @@ func messageID(d amqp.Delivery, headers map[string]string) string {
 // messageIDFromParts is the single shared implementation of the stable-ID
 // rule, used by both the AMQP and the management API mapping paths so a
 // message inspected either way gets the same ID.
+//
+// Dead-letter bookkeeping headers (x-death, x-first-death-*) are excluded
+// from the hash: they change on every DLQ hop (count increments, the time
+// moves) and the two read paths serialize them differently (AMQP decodes
+// timestamps to time.Time, the management API returns unix floats), so
+// including them would give a message a different ID per read path and per
+// hop. The hash covers the payload and the application headers — the content
+// identity — which is what a stable message ID should mean.
 func messageIDFromParts(msgID string, headers map[string]string, payload []byte) string {
 	if msgID != "" {
 		return msgID
@@ -63,12 +72,20 @@ func messageIDFromParts(msgID string, headers map[string]string, payload []byte)
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
+		if isDeathHeader(k) {
+			continue
+		}
 		h.Write([]byte(k))
 		h.Write([]byte{'='})
 		h.Write([]byte(headers[k]))
 		h.Write([]byte{0})
 	}
 	return "sha256:" + hex.EncodeToString(h.Sum(nil))
+}
+
+// isDeathHeader reports whether a header is RabbitMQ dead-letter bookkeeping.
+func isDeathHeader(k string) bool {
+	return strings.HasPrefix(k, "x-death") || strings.HasPrefix(k, "x-first-death")
 }
 
 // normalizeHeaders converts an amqp.Table into plain string values.

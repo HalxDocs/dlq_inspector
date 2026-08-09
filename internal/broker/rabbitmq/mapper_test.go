@@ -30,6 +30,59 @@ func TestToMessageFallsBackToHeaderID(t *testing.T) {
 	}
 }
 
+// TestMessageIDStableAcrossReadPaths pins the contract the whole recovery
+// loop depends on: a dead-lettered message must get the same ID whether it is
+// read through the AMQP path (Ack, delivery scan) or the management API path
+// (Inspect, Search). The x-death header serializes differently on each path
+// (AMQP timestamps become time.Time, management returns unix floats), so it
+// must not participate in the content hash.
+func TestMessageIDStableAcrossReadPaths(t *testing.T) {
+	payload := []byte(`{"order_id":1}`)
+	ts := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+
+	// AMQP path: x-death arrives as an amqp table with a timestamp value.
+	amqpHeaders := map[string]string{
+		"x-event-id": "evt_1",
+		"x-death": headerString([]interface{}{amqp.Table{
+			"queue": "orders", "reason": "rejected", "count": int32(1), "time": ts,
+		}}),
+	}
+	// Management path: the same logical header, but "time" is a unix float
+	// and counts are float64.
+	mgmtHeaders := map[string]string{
+		"x-event-id": "evt_1",
+		"x-death": headerString([]interface{}{map[string]any{
+			"queue": "orders", "reason": "rejected", "count": float64(1), "time": float64(ts.Unix()),
+		}}),
+	}
+
+	idAMQP := messageIDFromParts("", amqpHeaders, payload)
+	idMgmt := messageIDFromParts("", mgmtHeaders, payload)
+	if idAMQP != idMgmt {
+		t.Fatalf("ID differs across read paths:\n  amqp: %s\n  mgmt: %s", idAMQP, idMgmt)
+	}
+
+	// The ID must be stable across DLQ hops: a later hop changes the count
+	// and time inside x-death but not the content identity.
+	later := headerString([]interface{}{amqp.Table{
+		"queue": "orders", "reason": "rejected", "count": int32(2), "time": ts.Add(time.Hour),
+	}})
+	idLater := messageIDFromParts("", map[string]string{"x-event-id": "evt_1", "x-death": later}, payload)
+	if idLater != idAMQP {
+		t.Errorf("ID changed across DLQ hops: %s vs %s", idAMQP, idLater)
+	}
+
+	// Application headers and payload still participate.
+	otherPayload := messageIDFromParts("", amqpHeaders, []byte(`{"order_id":2}`))
+	if otherPayload == idAMQP {
+		t.Error("ID did not change with the payload")
+	}
+	otherHeader := messageIDFromParts("", map[string]string{"x-event-id": "evt_2", "x-death": amqpHeaders["x-death"]}, payload)
+	if otherHeader == idAMQP {
+		t.Error("ID did not change with an application header")
+	}
+}
+
 func TestToMessageContentHashID(t *testing.T) {
 	d := amqp.Delivery{Headers: amqp.Table{"h": "v"}, Body: []byte("body")}
 

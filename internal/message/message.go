@@ -12,8 +12,10 @@ import "time"
 type Message struct {
 	// ID is a stable identifier for the message. RabbitMQ has no native
 	// message ID, so adapters prefer an x-message-id header when present and
-	// fall back to a content hash (sha256 of payload + headers). This ID feeds
-	// inspect, audit, and duplicate detection.
+	// fall back to a content hash (sha256 of payload + application headers,
+	// excluding dead-letter bookkeeping so the ID is stable across DLQ hops
+	// and identical no matter which read path computed it). This ID feeds
+	// inspect, audit, duplicate detection, and recovery.
 	ID string
 
 	// Queue is the queue the message was read from (typically the DLQ).
