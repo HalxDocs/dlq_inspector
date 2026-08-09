@@ -233,6 +233,50 @@ func TestHistoryListsEntries(t *testing.T) {
 	}
 }
 
+func TestHistoryByPlanShowsFullTrail(t *testing.T) {
+	cfgPath, auditPath := replayTestConfig(t)
+	store, err := audit.Open(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range []audit.Entry{
+		{Action: audit.ActionRecover, PlanID: "plan_abc", MessageID: "m1", SourceQueue: "orders-dlq", Destination: "orders", Confirmed: true, Result: "success"},
+		{Action: audit.ActionRecover, PlanID: "plan_abc", MessageID: "m2", SourceQueue: "orders-dlq", Destination: "orders", Confirmed: true, Result: "publish_failed"},
+		{Action: audit.ActionRecover, PlanID: "plan_abc", SourceQueue: "orders-dlq", Destination: "orders", Confirmed: true, Result: "completed"},
+		{Action: audit.ActionReplay, PlanID: "plan_other", MessageID: "x", SourceQueue: "q", Destination: "d", Confirmed: true, Result: "success"},
+	} {
+		if err := store.Append(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store.Close()
+
+	out, err := runCommand(t, "history", "--plan", "plan_abc", "--config", cfgPath)
+	if err != nil {
+		t.Fatalf("history --plan: %v", err)
+	}
+	for _, want := range []string{"Plan plan_abc", "m1", "m2", "publish_failed", "completed", "(plan)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("history --plan output missing %q:\n%s", want, out)
+		}
+	}
+	// Entries from other plans must not appear.
+	if strings.Contains(out, "plan_other") || strings.Contains(out, "\tx\t") {
+		t.Errorf("history --plan leaked another plan's entries:\n%s", out)
+	}
+}
+
+func TestHistoryByPlanEmpty(t *testing.T) {
+	cfgPath, _ := replayTestConfig(t)
+	out, err := runCommand(t, "history", "--plan", "plan_nope", "--config", cfgPath)
+	if err != nil {
+		t.Fatalf("history --plan: %v", err)
+	}
+	if !strings.Contains(out, "No audit entries for plan plan_nope") {
+		t.Errorf("output = %q", out)
+	}
+}
+
 func TestHistoryJSONL(t *testing.T) {
 	cfgPath, auditPath := replayTestConfig(t)
 	store, err := audit.Open(auditPath)

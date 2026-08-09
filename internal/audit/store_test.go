@@ -94,6 +94,60 @@ func TestReplayedOnlyCountsConfirmedSuccess(t *testing.T) {
 	}
 }
 
+func TestByPlan(t *testing.T) {
+	s := openTestStore(t)
+	for _, e := range []Entry{
+		{Action: ActionRecover, PlanID: "plan_a", MessageID: "m1", SourceQueue: "q", Destination: "d", Confirmed: true, Result: "success"},
+		{Action: ActionRecover, PlanID: "plan_a", MessageID: "m2", SourceQueue: "q", Destination: "d", Confirmed: true, Result: "publish_failed"},
+		{Action: ActionRecover, PlanID: "plan_a", SourceQueue: "q", Destination: "d", Confirmed: true, Result: "completed"},
+		{Action: ActionRecover, PlanID: "plan_b", MessageID: "x", SourceQueue: "q", Destination: "d", Confirmed: true, Result: "success"},
+	} {
+		if err := s.Append(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	entries, err := s.ByPlan("plan_a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("ByPlan len = %d, want 3", len(entries))
+	}
+	// Oldest first (execution order): m1, m2, then the plan summary.
+	if entries[0].MessageID != "m1" || entries[1].MessageID != "m2" || entries[2].MessageID != "" {
+		t.Errorf("order = %+v", entries)
+	}
+	if entries[2].Result != "completed" {
+		t.Errorf("summary result = %s", entries[2].Result)
+	}
+
+	if other, err := s.ByPlan("plan_nope"); err != nil || len(other) != 0 {
+		t.Errorf("ByPlan(unknown) = %+v, %v; want empty", other, err)
+	}
+}
+
+func TestReplayedCountsRecoverSuccess(t *testing.T) {
+	s := openTestStore(t)
+	if err := s.Append(Entry{Action: ActionRecover, PlanID: "plan_a", MessageID: "m1", SourceQueue: "q", Destination: "d", Confirmed: true, Result: "success"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Append(Entry{Action: ActionRecover, PlanID: "plan_a", MessageID: "m2", SourceQueue: "q", Destination: "d", Confirmed: true, Result: "publish_failed"}); err != nil {
+		t.Fatal(err)
+	}
+
+	replayed, err := s.Replayed("m1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(replayed) != 1 {
+		t.Fatalf("Replayed(m1) = %+v, want the recover success", replayed)
+	}
+	if other, err := s.Replayed("m2"); err != nil || len(other) != 0 {
+		t.Errorf("Replayed(m2) = %+v, %v; want empty (publish_failed is not evidence)", other, err)
+	}
+}
+
 func TestExportJSONL(t *testing.T) {
 	s := openTestStore(t)
 	if err := s.Append(Entry{Action: ActionReplay, MessageID: "m1", SourceQueue: "q", Confirmed: true, Result: "success", Timestamp: time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)}); err != nil {

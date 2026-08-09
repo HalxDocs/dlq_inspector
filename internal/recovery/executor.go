@@ -62,19 +62,18 @@ type ExecutorOptions struct {
 	Profile    string
 	// Reason is the operator-provided justification, recorded on audit entries.
 	Reason string
-}
-
-// ExecutionResult summarizes one confirmed run.
+} // ExecutionResult summarizes one confirmed run.
 type ExecutionResult struct {
-	PlanID        string        `json:"plan_id"`
-	Selected      int           `json:"selected"`
-	Replayed      int           `json:"replayed"`
-	Skipped       int           `json:"skipped"`
-	Failed        int           `json:"failed"`
-	NewDLQEntries int           `json:"new_dlq_entries"`
-	Tripped       bool          `json:"tripped"`
-	Remaining     []string      `json:"remaining,omitempty"`
-	Duration      time.Duration `json:"duration"`
+	PlanID             string        `json:"plan_id"`
+	Selected           int           `json:"selected"`
+	Replayed           int           `json:"replayed"`
+	Skipped            int           `json:"skipped"`
+	Failed             int           `json:"failed"`
+	NewDLQEntries      int           `json:"new_dlq_entries"`
+	Tripped            bool          `json:"tripped"`
+	TrippedFailureRate float64       `json:"tripped_failure_rate,omitempty"`
+	Remaining          []string      `json:"remaining,omitempty"`
+	Duration           time.Duration `json:"duration"`
 }
 
 // Execute validates the plan against the current queue state, then replays
@@ -166,6 +165,7 @@ func (e Executor) Execute(ctx context.Context, plan *RecoveryPlan, opts Executor
 		rate := float64(batchFailures) / float64(len(batch))
 		if rate > opts.FailureThreshold {
 			res.Tripped = true
+			res.TrippedFailureRate = rate
 			res.Remaining = append([]string(nil), remaining...)
 			e.auditPlan(plan, "tripped", opts)
 			return res, nil

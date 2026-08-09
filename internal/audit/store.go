@@ -144,6 +144,18 @@ func (s *Store) Recent(limit int) ([]Entry, error) {
 	return s.query(query, args...)
 }
 
+// ByPlan returns every entry belonging to one recovery plan, oldest first,
+// so the full trail (per-message outcomes plus the plan-level summary) can
+// be reviewed in execution order.
+func (s *Store) ByPlan(planID string) ([]Entry, error) {
+	return s.query(`SELECT timestamp, action, message_id, plan_id, source_queue, destination,
+	          dry_run, confirmed, result, broker, profile, reason
+	          FROM audit
+	          WHERE plan_id = ?
+	          ORDER BY id ASC`,
+		planID)
+}
+
 // Replayed returns confirmed, successful replay entries for a message ID —
 // the duplicate evidence signal: a message that was already replayed or
 // recovered successfully should not be replayed again without thought. Both

@@ -240,22 +240,102 @@ func TestRecoverRejectsEmptySafetyChecks(t *testing.T) {
 	}
 }
 
-func TestRecoverConfirmNotYet(t *testing.T) {
-	cfgPath, _ := replayTestConfig(t)
+func TestRecoverConfirmExecutesAndAudits(t *testing.T) {
+	cfgPath, auditPath := replayTestConfig(t)
 	planPath := filepath.Join(t.TempDir(), "recovery.json")
 	p := recovery.RecoveryPlan{
-		ID: "plan_test", Queue: "orders-dlq", MessageIDs: []string{"m1"},
+		ID: "plan_test", Queue: "orders-dlq", MessageIDs: []string{"m1", "m2", "m3"},
 		Destination: "orders", Action: "replay",
-		Limits: recovery.DefaultLimits(), SafetyChecks: []string{recovery.CheckSchema},
+		Limits: recovery.DefaultLimits(), SafetyChecks: []string{recovery.CheckSchema, recovery.CheckDuplicate},
 	}
 	if err := writePlanFile(planPath, &p); err != nil {
 		t.Fatal(err)
 	}
-	withFakeBroker(t, &fakeBroker{})
+	fb := &fakeBroker{msgs: map[string][]message.Message{
+		"orders-dlq": {
+			{ID: "m1", Queue: "orders-dlq", Destination: "orders", Payload: []byte(`{}`)},
+			{ID: "m2", Queue: "orders-dlq", Destination: "orders", Payload: []byte(`{}`)},
+			{ID: "m3", Queue: "orders-dlq", Destination: "orders", Payload: []byte(`{}`)},
+		},
+	}}
+	withFakeBroker(t, fb)
 
-	_, err := runCommand(t, "recover", "--plan", planPath, "--confirm", "--config", cfgPath)
-	if err == nil || !strings.Contains(err.Error(), "next phase") {
-		t.Fatalf("expected not-yet error for --confirm, got %v", err)
+	out, err := runCommand(t, "recover", "--plan", planPath, "--confirm", "--batch-size", "2", "--rate-limit", "0", "--config", cfgPath)
+	if err != nil {
+		t.Fatalf("recover --confirm: %v\n%s", err, out)
+	}
+	for _, want := range []string{"Selected:", "3", "Replayed:", "3", "Skipped:", "0", "Failed during replay:", "0", "New DLQ entries:", "0", "Duration:"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("recover output missing %q:\n%s", want, out)
+		}
+	}
+
+	fb.mu.Lock()
+	published := len(fb.published)
+	acked := len(fb.acked)
+	fb.mu.Unlock()
+	if published != 3 || acked != 3 {
+		t.Fatalf("published=%d acked=%d, want 3 each", published, acked)
+	}
+
+	store, err := audit.Open(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	entries, err := store.ByPlan("plan_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 3 per-message successes + 1 plan-level summary.
+	if len(entries) != 4 {
+		t.Fatalf("plan trail entries = %d, want 4: %+v", len(entries), entries)
+	}
+}
+
+func TestRecoverConfirmCircuitBreakerTrips(t *testing.T) {
+	cfgPath, _ := replayTestConfig(t)
+	planPath := filepath.Join(t.TempDir(), "recovery.json")
+	p := recovery.RecoveryPlan{
+		ID: "plan_test", Queue: "orders-dlq", MessageIDs: []string{"m1", "m2", "m3", "m4", "m5"},
+		Destination: "orders", Action: "replay",
+		Limits: recovery.DefaultLimits(), SafetyChecks: []string{recovery.CheckSchema, recovery.CheckDuplicate},
+	}
+	if err := writePlanFile(planPath, &p); err != nil {
+		t.Fatal(err)
+	}
+	// publishErr fails every publish: the first batch (2 messages) trips the
+	// breaker at 100% failure rate and the remaining messages are paused.
+	fb := &fakeBroker{
+		msgs: map[string][]message.Message{
+			"orders-dlq": {
+				{ID: "m1", Queue: "orders-dlq", Destination: "orders", Payload: []byte(`{}`)},
+				{ID: "m2", Queue: "orders-dlq", Destination: "orders", Payload: []byte(`{}`)},
+				{ID: "m3", Queue: "orders-dlq", Destination: "orders", Payload: []byte(`{}`)},
+				{ID: "m4", Queue: "orders-dlq", Destination: "orders", Payload: []byte(`{}`)},
+				{ID: "m5", Queue: "orders-dlq", Destination: "orders", Payload: []byte(`{}`)},
+			},
+		},
+		publishErr: errBrokerDown,
+	}
+	withFakeBroker(t, fb)
+
+	out, err := runCommand(t, "recover", "--plan", planPath, "--confirm", "--batch-size", "2", "--rate-limit", "0", "--config", cfgPath)
+	if err != nil {
+		t.Fatalf("recover --confirm: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Circuit breaker tripped") {
+		t.Errorf("missing circuit breaker message:\n%s", out)
+	}
+	if !strings.Contains(out, "--resume") {
+		t.Errorf("missing --resume guidance:\n%s", out)
+	}
+
+	fb.mu.Lock()
+	acked := len(fb.acked)
+	fb.mu.Unlock()
+	if acked != 0 {
+		t.Fatalf("acked = %d after total publish failure, want 0", acked)
 	}
 }
 
