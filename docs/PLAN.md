@@ -348,10 +348,13 @@ interface + pass conformance, no engine changes.
 `-trimpath`, `-X main.{version,commit,date}` ldflags) with the release build verified
 locally (`dlq version` reports the injected metadata; `go version -m` shows
 modernc.org/sqlite embedded); README quickstart rewritten for the shipped CLI;
-`docs/COMMANDS.md` written as the full command reference.
+`docs/COMMANDS.md` written as the full command reference; golden-file CLI suite
+(`internal/command/golden_test.go` + `testdata/*.golden`, regenerated with
+`go test ./internal/command/ -run TestGolden -update`) snapshotting analyze, plan,
+and recover --dry-run output — run in the CI Test step against the in-memory
+fixture, with volatile plan IDs/paths pinned to placeholders.
 
-**Remaining:** `docs/ARCHITECTURE.md`, `docs/POLICIES.md`, and the golden-file CLI
-suite (analyze/plan/recover --dry-run snapshots) in CI.
+**Remaining:** `docs/ARCHITECTURE.md` and `docs/POLICIES.md`.
 
 **Post-1.0 adoption features (in priority order):**
 1. Interactive TUI (`dlq tui`) — k9s-style browsing + one-keystroke replay; the biggest

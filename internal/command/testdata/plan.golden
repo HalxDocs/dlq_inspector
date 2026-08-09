@@ -1,0 +1,3 @@
+Plan written: PLAN.json (3 messages selected), 1 excluded (left in DLQ)
+Plan ID: plan_XXXXXXXXXX
+Review it, then run: dlq recover --plan PLAN.json --dry-run

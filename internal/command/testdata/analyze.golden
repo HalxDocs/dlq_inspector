@@ -1,0 +1,25 @@
+4 messages analyzed in orders-dlq
+
+GROUP 1 -- Timeout connecting to [1159d804]
+2 messages - 50.0%
+Recommendation: REPLAYABLE (confidence 0.80)
+Signature:      timeout connecting to {ip}:{port}
+Destination:    orders
+Retries:        1-2
+Payload shape:  empty
+
+GROUP 2 -- Duplicate event already [3dc2d6dd]
+1 messages - 25.0%
+Recommendation: DO_NOT_REPLAY (confidence 0.90)
+Signature:      duplicate event already processed
+Destination:    orders
+Retries:        0
+Payload shape:  empty
+
+GROUP 3 -- Validation failed customer_id [9c1bf13d]
+1 messages - 25.0%
+Recommendation: REQUIRES_FIX (confidence 0.80)
+Signature:      validation failed: customer_id is required
+Destination:    orders
+Retries:        0
+Payload shape:  empty

@@ -1,0 +1,11 @@
+Recovery plan:                  PLAN.json
+Plan ID:                        plan_test
+Selected:                       3 messages
+Destination:                    orders
+Payload validation:             3/3 passed
+Messages that will be skipped:  0
+Messages to replay:             3
+Safety checks run:              schema_validated, duplicate_checked, destination_checked
+
+Changes made: NONE
+Dry run — validation only, no message was published or acked.
