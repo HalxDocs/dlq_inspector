@@ -73,12 +73,14 @@ func TestRecoveryLoopEndToEnd(t *testing.T) {
 	}
 	t.Cleanup(func() { _, _ = ch.QueueDelete(source, false, false, false) })
 
-	// Publish three failing messages with publisher confirms so we know they
-	// arrived before consuming.
+	// Publish four failing messages with publisher confirms so we know they
+	// arrived before consuming. The fourth carries x-duplicate-of: the
+	// application itself marks it as a duplicate, so the classifier must say
+	// DO_NOT_REPLAY and the plan must leave it in the DLQ.
 	if err := ch.Confirm(false); err != nil {
 		t.Fatalf("enable confirms: %v", err)
 	}
-	confirms := ch.NotifyPublish(make(chan amqp.Confirmation, 3))
+	confirms := ch.NotifyPublish(make(chan amqp.Confirmation, 4))
 	for i := 1; i <= 3; i++ {
 		body := fmt.Sprintf(`{"order_id":%d,"customer_id":%d}`, i, 1000+i)
 		if err := ch.Publish("", source, false, false, amqp.Publishing{
@@ -89,7 +91,18 @@ func TestRecoveryLoopEndToEnd(t *testing.T) {
 			t.Fatalf("publish %d: %v", i, err)
 		}
 	}
-	for i := 0; i < 3; i++ {
+	if err := ch.Publish("", source, false, false, amqp.Publishing{
+		ContentType:  "application/json",
+		DeliveryMode: amqp.Persistent,
+		Body:         []byte(`{"order_id":4,"customer_id":1004}`),
+		Headers: amqp.Table{
+			"x-duplicate-of": "evt_original_order_4",
+			"x-event-type":   "order.duplicate",
+		},
+	}); err != nil {
+		t.Fatalf("publish duplicate: %v", err)
+	}
+	for i := 0; i < 4; i++ {
 		if c := <-confirms; !c.Ack {
 			t.Fatalf("publish %d not confirmed", i+1)
 		}
@@ -104,7 +117,7 @@ func TestRecoveryLoopEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("consume: %v", err)
 	}
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 4; i++ {
 		select {
 		case d := <-deliveries:
 			if err := d.Nack(false, false); err != nil {
@@ -117,7 +130,7 @@ func TestRecoveryLoopEndToEnd(t *testing.T) {
 	if err := ch.Cancel("fixture-consumer", false); err != nil {
 		t.Fatalf("cancel consumer: %v", err)
 	}
-	waitQueueDepth(t, ch, dlq, 3)
+	waitQueueDepth(t, ch, dlq, 4)
 
 	// ---- Config: profile pointing at the live broker, temp audit store. ----
 	auditPath := filepath.Join(t.TempDir(), "audit.db")
@@ -145,18 +158,21 @@ func TestRecoveryLoopEndToEnd(t *testing.T) {
 		return buf.String()
 	}
 
-	// ---- Analyze: the three dead-lettered messages form one group. ----
+	// ---- Analyze: four messages form two groups; the duplicate-marked one
+	// must be its own group with a DO_NOT_REPLAY recommendation. ----
 	out := runCLI(t, "analyze", "--config", cfgPath)
-	for _, want := range []string{"3 messages analyzed", "Rejected", "REQUIRES_FIX", "3 messages - 100.0%"} {
+	for _, want := range []string{"4 messages analyzed", "Rejected", "REQUIRES_FIX", "DO_NOT_REPLAY", "order.duplicate"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("analyze output missing %q:\n%s", want, out)
 		}
 	}
 
-	// ---- Plan: all three are selected (REQUIRES_FIX is replayable). ----
+	// ---- Plan: the three replayable messages are selected; the duplicate is
+	// excluded and recorded on the plan. ----
 	planPath := filepath.Join(t.TempDir(), "recovery.json")
 	out = runCLI(t, "plan", "--config", cfgPath, "--output-file", planPath)
-	if !strings.Contains(out, "Plan written: "+planPath) || !strings.Contains(out, "3 messages selected") {
+	if !strings.Contains(out, "Plan written: "+planPath) || !strings.Contains(out, "3 messages selected") ||
+		!strings.Contains(out, "1 excluded (left in DLQ)") {
 		t.Errorf("plan output = %q", out)
 	}
 	planBytes, err := os.ReadFile(planPath)
@@ -170,32 +186,38 @@ func TestRecoveryLoopEndToEnd(t *testing.T) {
 	if len(plan.MessageIDs) != 3 || plan.Destination != source {
 		t.Errorf("plan = %+v", plan)
 	}
+	if len(plan.Excluded) != 1 || plan.Excluded[0].Classification != "DO_NOT_REPLAY" {
+		t.Errorf("plan exclusions = %+v, want the duplicate recorded as DO_NOT_REPLAY", plan.Excluded)
+	}
 
-	// ---- Dry-run: validates, changes nothing. ----
+	// ---- Dry-run: validates the selected three, reports the exclusion,
+	// changes nothing. ----
 	out = runCLI(t, "recover", "--plan", planPath, "--config", cfgPath)
-	for _, want := range []string{"Payload validation:", "3/3 passed", "Messages to replay:", "3", "Changes made: NONE"} {
+	for _, want := range []string{"Payload validation:", "3/3 passed", "Messages to replay:", "3", "Excluded:", "Changes made: NONE"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("dry-run output missing %q:\n%s", want, out)
 		}
 	}
 	// The dry-run must not have moved anything.
-	waitQueueDepth(t, ch, dlq, 3)
+	waitQueueDepth(t, ch, dlq, 4)
 
-	// ---- Confirm: replays all three to the source queue and acks the DLQ. ----
+	// ---- Confirm: replays the three, leaves the duplicate in the DLQ. ----
 	out = runCLI(t, "recover", "--plan", planPath, "--confirm", "--batch-size", "2", "--rate-limit", "0", "--output", "json", "--config", cfgPath)
 	var execRes recovery.ExecutionResult
 	if err := json.Unmarshal([]byte(out), &execRes); err != nil {
 		t.Fatalf("confirm output is not JSON: %v\n%s", err, out)
 	}
-	if execRes.Replayed != 3 || execRes.Failed != 0 || execRes.NewDLQEntries != 0 || execRes.Skipped != 0 || execRes.Tripped {
-		t.Errorf("execution result = %+v, want 3 replayed, 0 failed", execRes)
+	if execRes.Replayed != 3 || execRes.Excluded != 1 || execRes.Failed != 0 || execRes.NewDLQEntries != 0 || execRes.Skipped != 0 || execRes.Tripped {
+		t.Errorf("execution result = %+v, want 3 replayed, 1 excluded, 0 failed", execRes)
 	}
 
-	// DLQ drained, source queue holds the three replayed messages.
-	waitQueueDepth(t, ch, dlq, 0)
+	// The duplicate stays in the DLQ untouched; the source queue holds the
+	// three replayed messages.
+	waitQueueDepth(t, ch, dlq, 1)
 	waitQueueDepth(t, ch, source, 3)
 
-	// ---- History: the plan's full trail records every outcome. ----
+	// ---- History: the plan's full trail records every outcome, including
+	// the skipped duplicate. ----
 	out = runCLI(t, "history", "--plan", plan.ID, "--config", cfgPath)
 	if !strings.Contains(out, "Plan "+plan.ID) {
 		t.Errorf("history missing plan header:\n%s", out)
@@ -203,7 +225,7 @@ func TestRecoveryLoopEndToEnd(t *testing.T) {
 	if got := strings.Count(out, "success"); got != 3 {
 		t.Errorf("history has %d success entries, want 3:\n%s", got, out)
 	}
-	for _, want := range []string{"dry_run", "completed", "(plan)"} {
+	for _, want := range []string{"dry_run", "completed", "(plan)", "skipped"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("history output missing %q:\n%s", want, out)
 		}
