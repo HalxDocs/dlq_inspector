@@ -2,7 +2,6 @@ package command
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -25,8 +24,28 @@ type fakeBroker struct {
 	lastFilter broker.SearchFilter
 	// lastInspectID records the id passed to the most recent Inspect call.
 	lastInspectID string
+	// published records every Publish call (destination, message ID).
+	published []publishCall
+	// acked records every Ack call (queue, message ID).
+	acked []ackCall
+	// publishErr, when set, is returned by Publish.
+	publishErr error
+	// ackErr, when set, is returned by Ack.
+	ackErr error
 	// statsErr, when set, is returned by Stats for any queue.
 	statsErr error
+}
+
+// publishCall records one Publish invocation.
+type publishCall struct {
+	destination string
+	id          string
+}
+
+// ackCall records one Ack invocation.
+type ackCall struct {
+	queue string
+	id    string
 }
 
 func (f *fakeBroker) Connect(ctx context.Context, cfg broker.ConnectionConfig) error { return nil }
@@ -63,7 +82,17 @@ func (f *fakeBroker) Search(ctx context.Context, queue string, flt broker.Search
 }
 
 func (f *fakeBroker) Publish(ctx context.Context, destination string, msg *message.Message) error {
-	return errors.New("fakeBroker: Publish unimplemented")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.published = append(f.published, publishCall{destination: destination, id: msg.ID})
+	return f.publishErr
+}
+
+func (f *fakeBroker) Ack(ctx context.Context, queue, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.acked = append(f.acked, ackCall{queue: queue, id: id})
+	return f.ackErr
 }
 
 func (f *fakeBroker) Stats(ctx context.Context, queue string) (broker.QueueStats, error) {

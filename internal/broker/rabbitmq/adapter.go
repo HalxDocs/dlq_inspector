@@ -1,8 +1,8 @@
 // Package rabbitmq implements the Broker interface against RabbitMQ.
 //
-// Phase 1 delivered Connect/Close/ListQueues/Stats. Phase 2 delivers
+// Phase 1 delivered Connect/Close/ListQueues/Stats. Phase 2 delivered
 // Inspect/Search, which peek messages via the RabbitMQ management plugin
-// (HTTP API) without consuming them. Publish lands in phase 3 behind the
+// (HTTP API) without consuming them. Phase 3 delivers Publish/Ack behind the
 // shared safety gate. The recovery engine and command layer depend only on
 // the broker.Broker contract, so this adapter remains a drop-in behind the
 // interface.
@@ -19,9 +19,6 @@ import (
 	"github.com/HalxDocs/dlq_inspector/internal/message"
 	"github.com/HalxDocs/dlq_inspector/internal/search"
 )
-
-// ErrNotImplemented is returned by methods that land in later build phases.
-var ErrNotImplemented = errors.New("rabbitmq adapter: not implemented yet")
 
 // ErrNotConnected is returned when a method is called before Connect.
 var ErrNotConnected = errors.New("rabbitmq adapter: not connected — call Connect first")
@@ -161,10 +158,4 @@ func (a *Adapter) Search(ctx context.Context, queue string, f broker.SearchFilte
 		msgs = append(msgs, toMessageFromMgmt(raw, queue))
 	}
 	return search.Filter(msgs, f), nil
-}
-
-// Publish sends a message to a destination (the replay target). Implemented in
-// phase 3, behind the shared safety gate.
-func (a *Adapter) Publish(ctx context.Context, destination string, msg *message.Message) error {
-	return ErrNotImplemented
 }

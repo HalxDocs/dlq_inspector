@@ -25,6 +25,12 @@ type Broker interface {
 	Search(ctx context.Context, queue string, f SearchFilter) ([]message.Message, error)
 	// Publish sends a message to a destination (the replay target).
 	Publish(ctx context.Context, destination string, msg *message.Message) error
+	// Ack removes a message from a queue after it was successfully replayed.
+	// The safety gate guarantees Ack is only ever called after a successful
+	// Publish — never before. Adapters implement per-broker semantics
+	// (RabbitMQ consumes until the message is found; SQS deletes by receipt
+	// handle; ...).
+	Ack(ctx context.Context, queue string, id string) error
 	// Stats reports queue-level statistics.
 	Stats(ctx context.Context, queue string) (QueueStats, error)
 }
