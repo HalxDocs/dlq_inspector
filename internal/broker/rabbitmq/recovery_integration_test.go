@@ -237,6 +237,65 @@ func TestRecoveryLoopMissingDestination(t *testing.T) {
 	}
 }
 
+// TestReplayMissingDestinationLive covers the single-message path: after the
+// source queue is deleted, dlq replay must refuse a confirmed run before any
+// publish or ack (a publish into a nonexistent queue is confirmed and
+// silently dropped, so acking would lose the message), while the dry-run
+// surfaces the missing destination.
+func TestReplayMissingDestinationLive(t *testing.T) {
+	url := os.Getenv("DLQ_TEST_AMQP_URL")
+	mgmtURL := os.Getenv("DLQ_TEST_MANAGEMENT_URL")
+	if url == "" || mgmtURL == "" {
+		t.Skip("DLQ_TEST_AMQP_URL / DLQ_TEST_MANAGEMENT_URL not set")
+	}
+
+	conn, err := amqp.Dial(url)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+	ch, err := conn.Channel()
+	if err != nil {
+		t.Fatalf("channel: %v", err)
+	}
+	defer ch.Close()
+
+	// One failing message with an explicit message-id so the CLI can address
+	// it by a known ID.
+	f := newRecoveryFixture(t, ch)
+	f.deadLetter(t, ch, []amqp.Publishing{
+		{MessageId: "single-msg-1", ContentType: "application/json", DeliveryMode: amqp.Persistent, Body: []byte(`{"order_id":1,"customer_id":1001}`)},
+	}, 1)
+
+	// Delete the source queue: the replay destination no longer exists.
+	if _, err := ch.QueueDelete(f.source, false, false, false); err != nil {
+		t.Fatalf("delete source queue: %v", err)
+	}
+
+	cli := newRecoveryCLI(t, url, mgmtURL, f.dlq)
+	runCLI := func(t *testing.T, args ...string) string { return cli.run(t, args...) }
+	runCLIErr := func(t *testing.T, args ...string) (string, error) { return cli.runErr(args...) }
+
+	// ---- Dry-run: the missing destination is surfaced; nothing moves. ----
+	out := runCLI(t, "replay", "--id", "single-msg-1", "--config", cli.cfgPath)
+	for _, want := range []string{"single-msg-1", f.source, "does not exist", "Changes made: NONE"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("dry-run output missing %q:\n%s", want, out)
+		}
+	}
+	waitQueueDepth(t, ch, f.dlq, 1)
+
+	// ---- Confirm: refused before any publish or ack; the DLQ copy stays. ----
+	out, err = runCLIErr(t, "replay", "--id", "single-msg-1", "--confirm", "--yes", "--config", cli.cfgPath)
+	if err == nil || !strings.Contains(err.Error(), "refusing to replay") {
+		t.Fatalf("expected refusal, got err=%v\n%s", err, out)
+	}
+	if !strings.Contains(err.Error(), f.source) {
+		t.Errorf("refusal error = %q, want the destination name", err)
+	}
+	waitQueueDepth(t, ch, f.dlq, 1)
+}
+
 // recoveryFixture owns the queues/exchange of one recovery-loop scenario: a
 // source queue whose rejected messages dead-letter into a DLQ.
 type recoveryFixture struct {

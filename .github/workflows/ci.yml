@@ -48,11 +48,13 @@ jobs:
 
       # The end-to-end recovery loop is the v0.1 gate: analyze -> plan -> dry-run
       # -> confirm-recover -> history against a real broker, plus the
-      # missing-destination refusal scenario. Run both explicitly and fail the
-      # workflow if either ever skips, so a silent skip can never pass as
+      # missing-destination refusal scenarios for both the batch recover and
+      # the single-message replay paths. Run each explicitly and fail the
+      # workflow if any ever skips, so a silent skip can never pass as
       # coverage.
       - name: "Integration: full recovery loop"
         run: |
-          go test -count=1 -v -run 'TestRecoveryLoop(EndToEnd|MissingDestination)' ./internal/broker/rabbitmq/ | tee /tmp/recovery-test.log
+          go test -count=1 -v -run 'TestRecoveryLoop(EndToEnd|MissingDestination)|TestReplayMissingDestinationLive' ./internal/broker/rabbitmq/ | tee /tmp/recovery-test.log
           grep -- '--- PASS: TestRecoveryLoopEndToEnd' /tmp/recovery-test.log
           grep -- '--- PASS: TestRecoveryLoopMissingDestination' /tmp/recovery-test.log
+          grep -- '--- PASS: TestReplayMissingDestinationLive' /tmp/recovery-test.log
