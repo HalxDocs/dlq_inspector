@@ -12,11 +12,20 @@ import (
 
 // TestConformance runs the shared broker conformance suite against a real
 // RabbitMQ. Requires DLQ_TEST_AMQP_URL; DLQ_TEST_MANAGEMENT_URL is needed for
-// the queue-listing check.
+// the queue-listing and Search/Inspect (management API) checks.
 func TestConformance(t *testing.T) {
-	broker.RunConformance(t, &Adapter{}, broker.ConnectionConfig{
+	a := &Adapter{}
+	broker.RunConformance(t, a, broker.ConnectionConfig{
 		URL:           os.Getenv("DLQ_TEST_AMQP_URL"),
 		ManagementURL: os.Getenv("DLQ_TEST_MANAGEMENT_URL"),
+	}, func(t *testing.T, ctx context.Context) (string, func()) {
+		name := fmt.Sprintf("dlq-inspector-conf-%d", time.Now().UnixNano())
+		if _, err := a.conn.ch.QueueDeclare(name, true, false, false, false, nil); err != nil {
+			t.Fatalf("declare conformance queue: %v", err)
+		}
+		// The fixture cleanup runs at subtest end, before the suite's Close
+		// cleanup, so the queue is deleted while the channel is still open.
+		return name, func() { _, _ = a.conn.ch.QueueDelete(name, false, false, false) }
 	})
 }
 
