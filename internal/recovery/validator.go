@@ -44,6 +44,14 @@ type ValidationResult struct {
 	ChecksRun []string `json:"checks_run"`
 	// SkippedMessages details every skipped message, for the report and audit.
 	SkippedMessages []SkippedMessage `json:"skipped_messages,omitempty"`
+	// DestinationMissing is the plan's destination queue when it does not
+	// exist on the broker (empty when it exists or the check did not run). A
+	// confirmed run must refuse in this case — publishing into a nonexistent
+	// queue can be silently dropped.
+	DestinationMissing string `json:"destination_missing,omitempty"`
+	// Warnings lists non-blocking dry-run findings, e.g. the missing
+	// destination above.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // PlanValidator validates a plan against the live queue and the local audit
@@ -82,6 +90,25 @@ func (v PlanValidator) Validate(ctx context.Context, plan *RecoveryPlan) (*Valid
 		Queue:     plan.Queue,
 		Selected:  len(plan.MessageIDs),
 		ChecksRun: append([]string(nil), plan.SafetyChecks...),
+	}
+
+	// The destination check is plan-level: one Stats call (the existence
+	// probe) decides whether a confirmed run can possibly be safe. A missing
+	// destination is a warning here — the dry-run reports it and continues
+	// validating — but the executor refuses outright.
+	if contains(plan.SafetyChecks, CheckDestination) {
+		if plan.Destination == "" {
+			return nil, errors.New("validator: plan has no destination to check")
+		}
+		if _, err := v.Broker.Stats(ctx, plan.Destination); err != nil {
+			if errors.Is(err, broker.ErrQueueNotFound) {
+				res.DestinationMissing = plan.Destination
+				res.Warnings = append(res.Warnings,
+					fmt.Sprintf("destination queue %q does not exist — a confirmed run will be refused", plan.Destination))
+			} else {
+				return nil, fmt.Errorf("validator: check destination %q: %w", plan.Destination, err)
+			}
+		}
 	}
 
 	checkSchema := contains(plan.SafetyChecks, CheckSchema)

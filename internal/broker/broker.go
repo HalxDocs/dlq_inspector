@@ -6,10 +6,16 @@ package broker
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/HalxDocs/dlq_inspector/internal/message"
 )
+
+// ErrQueueNotFound is returned by queue-scoped operations — notably Stats,
+// which doubles as the recovery engine's destination-existence probe — when
+// the queue does not exist on the broker.
+var ErrQueueNotFound = errors.New("queue not found")
 
 // Broker is the contract every adapter implements.
 type Broker interface {
@@ -31,7 +37,9 @@ type Broker interface {
 	// (RabbitMQ consumes until the message is found; SQS deletes by receipt
 	// handle; ...).
 	Ack(ctx context.Context, queue string, id string) error
-	// Stats reports queue-level statistics.
+	// Stats reports queue-level statistics. It is also the recovery engine's
+	// destination-existence probe: adapters must return an error wrapping
+	// ErrQueueNotFound when the queue does not exist.
 	Stats(ctx context.Context, queue string) (QueueStats, error)
 }
 

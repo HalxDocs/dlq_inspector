@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -27,6 +28,10 @@ type valBroker struct {
 	failPublish map[string]int
 	// failAck is the set of message IDs whose Ack always fails.
 	failAck map[string]bool
+	// missingQueues are queue names Stats reports as not existing.
+	missingQueues map[string]bool
+	// statsErr, when set, is returned by Stats for every queue.
+	statsErr error
 }
 
 func (b *valBroker) Connect(ctx context.Context, cfg broker.ConnectionConfig) error { return nil }
@@ -72,6 +77,14 @@ func (b *valBroker) Ack(ctx context.Context, queue, id string) error {
 	return nil
 }
 func (b *valBroker) Stats(ctx context.Context, queue string) (broker.QueueStats, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.statsErr != nil {
+		return broker.QueueStats{}, b.statsErr
+	}
+	if b.missingQueues[queue] {
+		return broker.QueueStats{}, fmt.Errorf("queue %q not found: %w", queue, broker.ErrQueueNotFound)
+	}
 	return broker.QueueStats{}, nil
 }
 
@@ -84,7 +97,7 @@ func plan(t *testing.T, ids []string) *RecoveryPlan {
 		Destination:  "orders",
 		Action:       "replay",
 		Limits:       DefaultLimits(),
-		SafetyChecks: []string{CheckSchema, CheckDuplicate},
+		SafetyChecks: []string{CheckSchema, CheckDuplicate, CheckDestination},
 	}
 }
 
@@ -102,13 +115,57 @@ func TestValidateAllPass(t *testing.T) {
 	if res.Selected != 2 || res.Validated != 2 || res.Skipped != 0 || res.ToReplay != 2 {
 		t.Errorf("result = %+v", res)
 	}
-	if len(res.ChecksRun) != 2 {
+	if len(res.ChecksRun) != 3 {
 		t.Errorf("checks_run = %v", res.ChecksRun)
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.publishes != 0 || b.acks != 0 {
 		t.Fatalf("dry-run performed mutating I/O: publishes=%d acks=%d", b.publishes, b.acks)
+	}
+}
+
+func TestValidateFlagsMissingDestination(t *testing.T) {
+	// The dry-run reports a missing destination as a warning and keeps
+	// validating — but a confirmed run must refuse.
+	p := plan(t, []string{"m1"})
+	p.Destination = "vanished"
+	b := &valBroker{
+		msgs:          map[string][]message.Message{"orders-dlq": {{ID: "m1", Payload: []byte(`{}`)}}},
+		missingQueues: map[string]bool{"vanished": true},
+	}
+	res, err := (PlanValidator{Broker: b}).Validate(context.Background(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.DestinationMissing != "vanished" {
+		t.Errorf("destination_missing = %q, want vanished", res.DestinationMissing)
+	}
+	if len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "vanished") {
+		t.Errorf("warnings = %v", res.Warnings)
+	}
+	// The rest of the dry-run still validated the message.
+	if res.Validated != 1 || res.ToReplay != 1 {
+		t.Errorf("result = %+v", res)
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.publishes != 0 || b.acks != 0 {
+		t.Fatalf("dry-run performed mutating I/O: publishes=%d acks=%d", b.publishes, b.acks)
+	}
+}
+
+func TestValidateDestinationStatsError(t *testing.T) {
+	// A Stats error that is not "queue not found" (broker down, permissions)
+	// is a hard validation error, not a warning.
+	p := plan(t, []string{"m1"})
+	b := &valBroker{
+		msgs:     map[string][]message.Message{"orders-dlq": {{ID: "m1", Payload: []byte(`{}`)}}},
+		statsErr: errors.New("broker down"),
+	}
+	_, err := (PlanValidator{Broker: b}).Validate(context.Background(), p)
+	if err == nil || !strings.Contains(err.Error(), "check destination") {
+		t.Fatalf("got %v, want a destination-check error", err)
 	}
 }
 

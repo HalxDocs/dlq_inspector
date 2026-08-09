@@ -45,8 +45,11 @@ func TestBuildPlanAllGroupsExcludesDoNotReplay(t *testing.T) {
 	if plan.Action != "replay" {
 		t.Errorf("action = %q", plan.Action)
 	}
-	if len(plan.SafetyChecks) != 2 {
+	if len(plan.SafetyChecks) != 3 {
 		t.Errorf("safety checks = %v", plan.SafetyChecks)
+	}
+	if !contains(plan.SafetyChecks, CheckDestination) {
+		t.Errorf("safety checks %v missing destination_checked", plan.SafetyChecks)
 	}
 }
 

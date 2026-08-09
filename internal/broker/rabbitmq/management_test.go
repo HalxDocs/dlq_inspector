@@ -1,8 +1,12 @@
 package rabbitmq
 
 import (
+	"errors"
 	"net/url"
+	"strings"
 	"testing"
+
+	amqp "github.com/rabbitmq/amqp091-go"
 
 	"github.com/HalxDocs/dlq_inspector/internal/broker"
 )
@@ -73,6 +77,34 @@ func TestManagementClientCustomVhost(t *testing.T) {
 	}
 	if c.user != "user" || c.pass != "secret" {
 		t.Errorf("creds = (%q, %q)", c.user, c.pass)
+	}
+}
+
+func TestFriendlyQueueErrorWrapsNotFound(t *testing.T) {
+	// A 404 from a passive declare must surface as broker.ErrQueueNotFound so
+	// the recovery engine can tell "destination does not exist" (refuse to
+	// run) from a transient broker error (report it).
+	err := friendlyQueueError("vanished", &amqp.Error{Code: amqp.NotFound, Reason: "NOT_FOUND - no queue 'vanished'"})
+	if !errors.Is(err, broker.ErrQueueNotFound) {
+		t.Fatalf("err = %v, want it to wrap broker.ErrQueueNotFound", err)
+	}
+	if !strings.Contains(err.Error(), "vanished") {
+		t.Errorf("err = %q, want the queue name", err)
+	}
+}
+
+func TestFriendlyQueueErrorOtherCodes(t *testing.T) {
+	// Access-refused and transport errors are NOT not-found: they must not
+	// match the sentinel, so the recovery engine reports them rather than
+	// refusing on a false premise.
+	for _, code := range []int{amqp.AccessRefused, amqp.InternalError} {
+		err := friendlyQueueError("orders", &amqp.Error{Code: code, Reason: "nope"})
+		if errors.Is(err, broker.ErrQueueNotFound) {
+			t.Errorf("code %d matched ErrQueueNotFound", code)
+		}
+	}
+	if errors.Is(friendlyQueueError("orders", errors.New("connection reset")), broker.ErrQueueNotFound) {
+		t.Error("non-AMQP error matched ErrQueueNotFound")
 	}
 }
 

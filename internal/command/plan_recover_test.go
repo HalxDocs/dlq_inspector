@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/HalxDocs/dlq_inspector/internal/audit"
+	"github.com/HalxDocs/dlq_inspector/internal/broker"
 	"github.com/HalxDocs/dlq_inspector/internal/message"
 	"github.com/HalxDocs/dlq_inspector/internal/recovery"
 )
@@ -279,13 +280,16 @@ func TestRecoverConfirmExecutesAndAudits(t *testing.T) {
 	if err := writePlanFile(planPath, &p); err != nil {
 		t.Fatal(err)
 	}
-	fb := &fakeBroker{msgs: map[string][]message.Message{
-		"orders-dlq": {
-			{ID: "m1", Queue: "orders-dlq", Destination: "orders", Payload: []byte(`{}`)},
-			{ID: "m2", Queue: "orders-dlq", Destination: "orders", Payload: []byte(`{}`)},
-			{ID: "m3", Queue: "orders-dlq", Destination: "orders", Payload: []byte(`{}`)},
+	fb := &fakeBroker{
+		queues: []broker.QueueSummary{{Name: "orders"}},
+		msgs: map[string][]message.Message{
+			"orders-dlq": {
+				{ID: "m1", Queue: "orders-dlq", Destination: "orders", Payload: []byte(`{}`)},
+				{ID: "m2", Queue: "orders-dlq", Destination: "orders", Payload: []byte(`{}`)},
+				{ID: "m3", Queue: "orders-dlq", Destination: "orders", Payload: []byte(`{}`)},
+			},
 		},
-	}}
+	}
 	withFakeBroker(t, fb)
 
 	out, err := runCommand(t, "recover", "--plan", planPath, "--confirm", "--batch-size", "2", "--rate-limit", "0", "--config", cfgPath)
@@ -335,6 +339,7 @@ func TestRecoverConfirmCircuitBreakerTrips(t *testing.T) {
 	// publishErr fails every publish: the first batch (2 messages) trips the
 	// breaker at 100% failure rate and the remaining messages are paused.
 	fb := &fakeBroker{
+		queues: []broker.QueueSummary{{Name: "orders"}},
 		msgs: map[string][]message.Message{
 			"orders-dlq": {
 				{ID: "m1", Queue: "orders-dlq", Destination: "orders", Payload: []byte(`{}`)},
@@ -405,5 +410,92 @@ func TestRecoverJSON(t *testing.T) {
 	}
 	if res.PlanID != "plan_test" || res.Selected != 1 || res.ToReplay != 1 {
 		t.Errorf("result = %+v", res)
+	}
+}
+
+func TestRecoverDryRunSurfacesMissingDestination(t *testing.T) {
+	cfgPath, _ := replayTestConfig(t)
+	planPath := filepath.Join(t.TempDir(), "recovery.json")
+	p := recovery.RecoveryPlan{
+		ID: "plan_test", Queue: "orders-dlq", MessageIDs: []string{"m1"},
+		Destination: "vanished", Action: "replay",
+		Limits:       recovery.DefaultLimits(),
+		SafetyChecks: []string{recovery.CheckSchema, recovery.CheckDuplicate, recovery.CheckDestination},
+	}
+	if err := writePlanFile(planPath, &p); err != nil {
+		t.Fatal(err)
+	}
+	// No queues registered: the destination does not exist.
+	fb := &fakeBroker{msgs: map[string][]message.Message{
+		"orders-dlq": {{ID: "m1", Queue: "orders-dlq", Destination: "vanished", Payload: []byte(`{}`)}},
+	}}
+	withFakeBroker(t, fb)
+
+	out, err := runCommand(t, "recover", "--plan", planPath, "--config", cfgPath)
+	if err != nil {
+		t.Fatalf("recover: %v\n%s", err, out)
+	}
+	for _, want := range []string{
+		"Destination warning:", "vanished", "does not exist",
+		"Payload validation:", "1/1 passed",
+		"Messages to replay:", "1",
+		"Changes made: NONE",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("recover output missing %q:\n%s", want, out)
+		}
+	}
+
+	fb.mu.Lock()
+	published := len(fb.published)
+	acked := len(fb.acked)
+	fb.mu.Unlock()
+	if published != 0 || acked != 0 {
+		t.Fatalf("dry-run performed mutating I/O: published=%d acked=%d", published, acked)
+	}
+}
+
+func TestRecoverConfirmRefusesMissingDestination(t *testing.T) {
+	cfgPath, auditPath := replayTestConfig(t)
+	planPath := filepath.Join(t.TempDir(), "recovery.json")
+	// Deliberately a plan without the declared destination check: the
+	// executor's invariant must still refuse.
+	p := recovery.RecoveryPlan{
+		ID: "plan_test", Queue: "orders-dlq", MessageIDs: []string{"m1"},
+		Destination: "vanished", Action: "replay",
+		Limits:       recovery.DefaultLimits(),
+		SafetyChecks: []string{recovery.CheckSchema, recovery.CheckDuplicate},
+	}
+	if err := writePlanFile(planPath, &p); err != nil {
+		t.Fatal(err)
+	}
+	fb := &fakeBroker{msgs: map[string][]message.Message{
+		"orders-dlq": {{ID: "m1", Queue: "orders-dlq", Destination: "vanished", Payload: []byte(`{}`)}},
+	}}
+	withFakeBroker(t, fb)
+
+	out, err := runCommand(t, "recover", "--plan", planPath, "--confirm", "--rate-limit", "0", "--config", cfgPath)
+	if err == nil || !strings.Contains(err.Error(), "refusing to run") {
+		t.Fatalf("expected refusal, got err=%v\n%s", err, out)
+	}
+	fb.mu.Lock()
+	published := len(fb.published)
+	acked := len(fb.acked)
+	fb.mu.Unlock()
+	if published != 0 || acked != 0 {
+		t.Fatalf("refused run performed I/O: published=%d acked=%d", published, acked)
+	}
+
+	store, err := audit.Open(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	entries, err := store.ByPlan("plan_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Result != "refused" {
+		t.Errorf("plan trail = %+v, want one refused entry", entries)
 	}
 }

@@ -28,6 +28,13 @@ var ErrConfirmRequired = errors.New("confirmation required: re-run with --confir
 // --resume after a trip.
 var ErrResumeRequired = errors.New("circuit breaker tripped — re-run with --resume to continue")
 
+// ErrDestinationMissing is returned when the plan's destination queue does
+// not exist. Publishing into a nonexistent queue can be confirmed and
+// silently dropped (RabbitMQ drops unroutable publishes), after which acking
+// the DLQ copy would lose the message — so the run is refused before
+// anything is published or acked.
+var ErrDestinationMissing = errors.New("destination queue does not exist — refusing to run")
+
 // Executor runs a confirmed recovery plan: republish each selected message to
 // its destination and ack the DLQ copy only after a successful publish. It
 // enforces the safety gate (no execution without Confirm), the plan's limits
@@ -88,6 +95,21 @@ func (e Executor) Execute(ctx context.Context, plan *RecoveryPlan, opts Executor
 	}
 	if len(plan.SafetyChecks) == 0 {
 		return nil, ErrNoSafetyChecks
+	}
+
+	// Hard safety invariant, independent of the plan's declared checks: never
+	// publish into a destination that does not exist. A publish to a
+	// nonexistent queue can be confirmed and silently dropped — acking the
+	// DLQ copy afterwards would lose the message. Refuse before any publish,
+	// ack, or per-message audit write; the refusal itself is recorded.
+	if plan.Destination != "" {
+		if _, err := e.Broker.Stats(ctx, plan.Destination); err != nil {
+			if errors.Is(err, broker.ErrQueueNotFound) {
+				e.auditPlan(plan, "refused", opts)
+				return nil, fmt.Errorf("%w: queue %q", ErrDestinationMissing, plan.Destination)
+			}
+			return nil, fmt.Errorf("executor: check destination %q: %w", plan.Destination, err)
+		}
 	}
 	start := time.Now()
 

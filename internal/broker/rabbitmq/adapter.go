@@ -89,11 +89,13 @@ func (a *Adapter) Stats(ctx context.Context, queue string) (broker.QueueStats, e
 	}, nil
 }
 
-// friendlyQueueError maps common AMQP errors onto clear messages.
+// friendlyQueueError maps common AMQP errors onto clear messages. A missing
+// queue wraps broker.ErrQueueNotFound so the recovery engine can distinguish
+// "does not exist" (refuse to run) from "broker hiccup" (report the error).
 func friendlyQueueError(queue string, err error) error {
 	var ae *amqp.Error
 	if errors.As(err, &ae) && ae.Code == amqp.NotFound {
-		return fmt.Errorf("queue %q not found", queue)
+		return fmt.Errorf("queue %q not found: %w", queue, broker.ErrQueueNotFound)
 	}
 	return fmt.Errorf("rabbitmq: queue %q: %w", queue, err)
 }

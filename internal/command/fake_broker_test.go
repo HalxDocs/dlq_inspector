@@ -106,7 +106,7 @@ func (f *fakeBroker) Stats(ctx context.Context, queue string) (broker.QueueStats
 			return broker.QueueStats{Queue: q.Name, Messages: q.Messages, Consumers: q.Consumers}, nil
 		}
 	}
-	return broker.QueueStats{}, fmt.Errorf("queue %q not found", queue)
+	return broker.QueueStats{}, fmt.Errorf("queue %q not found: %w", queue, broker.ErrQueueNotFound)
 }
 
 // withFakeBroker swaps the command package's broker factory for fb for the

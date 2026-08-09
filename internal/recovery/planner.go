@@ -73,6 +73,12 @@ type ExcludedMessage struct {
 const (
 	CheckSchema    = "schema_validated"
 	CheckDuplicate = "duplicate_checked"
+	// CheckDestination verifies the replay destination queue exists before
+	// anything is published. Publishing into a nonexistent queue can be
+	// silently dropped (RabbitMQ confirms unroutable publishes), which would
+	// lose the DLQ copy after the ack — so the dry-run surfaces it and a
+	// confirmed run refuses to start.
+	CheckDestination = "destination_checked"
 )
 
 // ErrNoSafetyChecks is returned when a plan declares no safety checks — the
@@ -176,7 +182,7 @@ func BuildPlan(msgs []message.Message, opts PlanOptions) (*RecoveryPlan, error) 
 		Destination:  dest,
 		Action:       "replay",
 		Limits:       opts.Limits,
-		SafetyChecks: []string{CheckSchema, CheckDuplicate},
+		SafetyChecks: []string{CheckSchema, CheckDuplicate, CheckDestination},
 	}, nil
 }
 

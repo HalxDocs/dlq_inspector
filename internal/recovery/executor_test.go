@@ -21,7 +21,7 @@ func execPlan(ids ...string) *RecoveryPlan {
 		Destination:  "orders",
 		Action:       "replay",
 		Limits:       DefaultLimits(),
-		SafetyChecks: []string{CheckSchema, CheckDuplicate},
+		SafetyChecks: []string{CheckSchema, CheckDuplicate, CheckDestination},
 	}
 }
 
@@ -85,6 +85,45 @@ func TestExecuteRefusesWithoutConfirm(t *testing.T) {
 	_, err := (Executor{Broker: b}).Execute(context.Background(), execPlan("m1"), ExecutorOptions{})
 	if !errors.Is(err, ErrConfirmRequired) {
 		t.Fatalf("got %v, want ErrConfirmRequired", err)
+	}
+}
+
+func TestExecuteRefusesMissingDestination(t *testing.T) {
+	// The destination-existence check is a hard invariant, independent of the
+	// plan's declared checks: publishing into a nonexistent queue can be
+	// confirmed and silently dropped, after which acking the DLQ copy would
+	// lose the message. The run must refuse before any publish or ack.
+	store := execStore(t)
+	p := execPlan("m1", "m2")
+	// Deliberately omit the declared check — the invariant must still hold.
+	p.SafetyChecks = []string{CheckSchema, CheckDuplicate}
+	b := &valBroker{
+		msgs:          map[string][]message.Message{"orders-dlq": execMsgs("m1", "m2")},
+		missingQueues: map[string]bool{"orders": true},
+	}
+	ex := Executor{Broker: b, Audit: store}
+
+	_, err := ex.Execute(context.Background(), p, ExecutorOptions{
+		Confirm: true, BatchSize: 2, RateLimit: "0",
+	})
+	if !errors.Is(err, ErrDestinationMissing) {
+		t.Fatalf("got %v, want ErrDestinationMissing", err)
+	}
+	b.mu.Lock()
+	published := b.publishes
+	acked := b.acks
+	b.mu.Unlock()
+	if published != 0 || acked != 0 {
+		t.Fatalf("refused run performed I/O: publishes=%d acks=%d", published, acked)
+	}
+
+	// The refusal itself is audited so the trail explains why nothing ran.
+	entries, err := store.Recent(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Result != "refused" || entries[0].PlanID != "plan_exec" {
+		t.Errorf("audit entries = %+v, want one refused plan entry", entries)
 	}
 }
 

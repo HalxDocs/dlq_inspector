@@ -198,8 +198,8 @@ executor's dry-run proves it before anything runs.
 **Exit gate:**
 - `dlq plan <queue> --group <id>` writes `recovery.json`: plan ID, queue, message IDs,
   destination, action, `PlanLimits` (batch-size, rate-limit, concurrency), and the
-  `SafetyChecks` list (`schema_validated`, `duplicate_checked`). Plan is reviewed/diffed
-  as JSON before execution.
+  `SafetyChecks` list (`schema_validated`, `duplicate_checked`, `destination_checked`).
+  Plan is reviewed/diffed as JSON before execution.
 - `dlq recover --plan recovery.json --dry-run` validates: payload/schema check per
   message, duplicate evidence (event ID / idempotency-key matching in
   `internal/dedupe`), skip counts, and reports `Changes made: NONE`. **Zero mutating I/O.**
@@ -231,6 +231,10 @@ the recovery-engine MVP.
   message IDs, source→destination, action, reason, operator, result).
 - Audit entries written per message (success / failed / skipped) plus the plan-level
   summary.
+- **Destination invariant:** the executor refuses to run (before any publish or ack,
+  audited as `refused`) when the plan's destination queue does not exist — publishing
+  into a nonexistent queue can be confirmed and silently dropped, which would lose the
+  DLQ copy. The dry-run surfaces the same finding as a `Destination warning`.
 
 **Packages:** `internal/recovery/executor.go`, `internal/command/recover.go`, `history.go`,
 `internal/audit` (plan queries).

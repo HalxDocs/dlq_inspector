@@ -130,6 +130,9 @@ func renderRecoverReport(cmd *cobra.Command, planPath string, p *recovery.Recove
 	fmt.Fprintf(tw, "Plan ID:\t%s\n", p.ID)
 	fmt.Fprintf(tw, "Selected:\t%d messages\n", res.Selected)
 	fmt.Fprintf(tw, "Destination:\t%s\n", p.Destination)
+	if res.DestinationMissing != "" {
+		fmt.Fprintf(tw, "Destination warning:\tqueue %q does not exist — a confirmed run will be refused\n", res.DestinationMissing)
+	}
 	fmt.Fprintf(tw, "Payload validation:\t%d/%d passed\n", res.Validated, res.Selected)
 	if res.Duplicates > 0 {
 		fmt.Fprintf(tw, "Duplicate warning:\t%d\n", res.Duplicates)
