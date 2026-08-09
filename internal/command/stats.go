@@ -24,14 +24,9 @@ default_queue is used.`,
 			}
 			defer b.Close()
 
-			queue := ""
-			if len(args) == 1 {
-				queue = args[0]
-			} else {
-				queue = profile.DefaultQueue
-			}
-			if queue == "" {
-				return fmt.Errorf("no queue given and the profile has no default_queue set")
+			queue, err := resolveQueue(args, profile.DefaultQueue)
+			if err != nil {
+				return err
 			}
 
 			stats, err := b.Stats(ctx, queue)

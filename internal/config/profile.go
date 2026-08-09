@@ -18,6 +18,10 @@ type Profile struct {
 	RequireConfirm   bool   `yaml:"require_confirm,omitempty"`
 	RequireCoConfirm bool   `yaml:"require_co_confirm,omitempty"`
 	PolicyFile       string `yaml:"policy_file,omitempty"`
+	// SensitiveFields are dotted payload paths masked by default in
+	// inspect/search output (e.g. "customer.email"). Revealed only with
+	// --show-sensitive.
+	SensitiveFields []string `yaml:"sensitive_fields,omitempty"`
 }
 
 // ResolveURL returns the effective connection URL for the profile, preferring

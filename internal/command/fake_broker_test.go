@@ -17,6 +17,14 @@ import (
 type fakeBroker struct {
 	mu     sync.Mutex
 	queues []broker.QueueSummary
+	// msgs are returned by Inspect/Search, keyed by queue.
+	msgs map[string][]message.Message
+	// searchErr, when set, is returned by Search.
+	searchErr error
+	// lastFilter records the filter passed to the most recent Search call.
+	lastFilter broker.SearchFilter
+	// lastInspectID records the id passed to the most recent Inspect call.
+	lastInspectID string
 	// statsErr, when set, is returned by Stats for any queue.
 	statsErr error
 }
@@ -32,11 +40,26 @@ func (f *fakeBroker) ListQueues(ctx context.Context) ([]broker.QueueSummary, err
 }
 
 func (f *fakeBroker) Inspect(ctx context.Context, queue, id string) (*message.Message, error) {
-	return nil, errors.New("fakeBroker: Inspect unimplemented")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lastInspectID = id
+	for _, m := range f.msgs[queue] {
+		if m.ID == id {
+			copy := m
+			return &copy, nil
+		}
+	}
+	return nil, fmt.Errorf("message %q not found in queue %q", id, queue)
 }
 
 func (f *fakeBroker) Search(ctx context.Context, queue string, flt broker.SearchFilter) ([]message.Message, error) {
-	return nil, errors.New("fakeBroker: Search unimplemented")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lastFilter = flt
+	if f.searchErr != nil {
+		return nil, f.searchErr
+	}
+	return append([]message.Message(nil), f.msgs[queue]...), nil
 }
 
 func (f *fakeBroker) Publish(ctx context.Context, destination string, msg *message.Message) error {

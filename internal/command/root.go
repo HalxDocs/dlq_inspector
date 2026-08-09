@@ -58,6 +58,8 @@ Workflow: Inspect -> Analyze -> Classify -> Plan -> Validate -> Dry-run -> Recov
 		newProfilesCmd(opts),
 		newQueuesCmd(opts),
 		newStatsCmd(opts),
+		newInspectCmd(opts),
+		newSearchCmd(opts),
 	)
 
 	return root
