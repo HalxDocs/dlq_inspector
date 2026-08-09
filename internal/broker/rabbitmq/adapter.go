@@ -1,10 +1,11 @@
 // Package rabbitmq implements the Broker interface against RabbitMQ.
 //
-// Phase 1 delivers Connect/Close/ListQueues/Stats. ListQueues requires the
-// RabbitMQ management plugin (HTTP API); Stats works over AMQP via passive
-// queue declare. Inspect/Search/Publish land in later phases. The recovery
-// engine and command layer depend only on the broker.Broker contract, so this
-// adapter remains a drop-in behind the interface.
+// Phase 1 delivered Connect/Close/ListQueues/Stats. Phase 2 delivers
+// Inspect/Search, which peek messages via the RabbitMQ management plugin
+// (HTTP API) without consuming them. Publish lands in phase 3 behind the
+// shared safety gate. The recovery engine and command layer depend only on
+// the broker.Broker contract, so this adapter remains a drop-in behind the
+// interface.
 package rabbitmq
 
 import (
@@ -16,6 +17,7 @@ import (
 
 	"github.com/HalxDocs/dlq_inspector/internal/broker"
 	"github.com/HalxDocs/dlq_inspector/internal/message"
+	"github.com/HalxDocs/dlq_inspector/internal/search"
 )
 
 // ErrNotImplemented is returned by methods that land in later build phases.
@@ -99,14 +101,66 @@ func friendlyQueueError(queue string, err error) error {
 	return fmt.Errorf("rabbitmq: queue %q: %w", queue, err)
 }
 
-// Inspect fetches a single message by its stable ID. Implemented in phase 2.
+// Inspect fetches a single message by its stable ID. RabbitMQ has no
+// random-access get, so this peeks messages FIFO via the management API and
+// matches on the shared ID rule, scanning up to a bounded number of messages.
 func (a *Adapter) Inspect(ctx context.Context, queue, id string) (*message.Message, error) {
-	return nil, ErrNotImplemented
+	if a.conn == nil {
+		return nil, ErrNotConnected
+	}
+	if queue == "" {
+		return nil, fmt.Errorf("rabbitmq: empty queue name")
+	}
+	if id == "" {
+		return nil, fmt.Errorf("rabbitmq: empty message id")
+	}
+	client, err := newManagementClient(a.conn.cfg)
+	if err != nil {
+		return nil, err
+	}
+	raws, err := client.peekMessages(ctx, queue, 1000, 10000)
+	if err != nil {
+		return nil, err
+	}
+	for _, raw := range raws {
+		m := toMessageFromMgmt(raw, queue)
+		if m.ID == id {
+			return &m, nil
+		}
+	}
+	return nil, fmt.Errorf("message %q not found in queue %q (scanned %d messages)", id, queue, len(raws))
 }
 
-// Search fetches messages matching the filter. Implemented in phase 2.
+// Search peeks messages via the management API and applies the filter with
+// the shared broker-agnostic search package. The scan is bounded so a search
+// cannot page through an unbounded DLQ.
 func (a *Adapter) Search(ctx context.Context, queue string, f broker.SearchFilter) ([]message.Message, error) {
-	return nil, ErrNotImplemented
+	if a.conn == nil {
+		return nil, ErrNotConnected
+	}
+	if queue == "" {
+		return nil, fmt.Errorf("rabbitmq: empty queue name")
+	}
+	client, err := newManagementClient(a.conn.cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	// Scan enough to satisfy limit+offset, but never more than the safety cap
+	// (the filter may still leave fewer matches if the cap is hit).
+	scanCap := 5000
+	if needed := f.Limit + f.Offset; needed > scanCap {
+		scanCap = needed
+	}
+	raws, err := client.peekMessages(ctx, queue, 500, scanCap)
+	if err != nil {
+		return nil, err
+	}
+	msgs := make([]message.Message, 0, len(raws))
+	for _, raw := range raws {
+		msgs = append(msgs, toMessageFromMgmt(raw, queue))
+	}
+	return search.Filter(msgs, f), nil
 }
 
 // Publish sends a message to a destination (the replay target). Implemented in

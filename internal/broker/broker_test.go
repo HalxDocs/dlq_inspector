@@ -48,12 +48,8 @@ func TestRabbitMQRemainingStubs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.Inspect(t.Context(), "q", "id"); err != rabbitmq.ErrNotImplemented {
-		t.Errorf("Inspect() = %v, want ErrNotImplemented", err)
-	}
-	if _, err := b.Search(t.Context(), "q", broker.SearchFilter{}); err != rabbitmq.ErrNotImplemented {
-		t.Errorf("Search() = %v, want ErrNotImplemented", err)
-	}
+	// Publish is the last unimplemented surface until phase 3 lands it behind
+	// the shared safety gate.
 	if err := b.Publish(t.Context(), "q", nil); err != rabbitmq.ErrNotImplemented {
 		t.Errorf("Publish() = %v, want ErrNotImplemented", err)
 	}

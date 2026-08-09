@@ -36,20 +36,27 @@ func toMessage(d amqp.Delivery, queue string) message.Message {
 	}
 }
 
-// messageID implements the stable-ID rule from the build plan: the amqp
-// message-id property, else the x-message-id header, else a sha256 content
-// hash of the payload and canonical headers. The delivery tag is deliberately
-// not used — it is scoped to one connection and therefore unstable.
+// messageID implements the stable-ID rule from the build plan for AMQP
+// deliveries: the amqp message-id property, else the x-message-id header,
+// else a sha256 content hash. The delivery tag is deliberately not used — it
+// is scoped to one connection and therefore unstable.
 func messageID(d amqp.Delivery, headers map[string]string) string {
-	if d.MessageId != "" {
-		return d.MessageId
+	return messageIDFromParts(d.MessageId, headers, d.Body)
+}
+
+// messageIDFromParts is the single shared implementation of the stable-ID
+// rule, used by both the AMQP and the management API mapping paths so a
+// message inspected either way gets the same ID.
+func messageIDFromParts(msgID string, headers map[string]string, payload []byte) string {
+	if msgID != "" {
+		return msgID
 	}
 	if id := headers["x-message-id"]; id != "" {
 		return id
 	}
 
 	h := sha256.New()
-	h.Write(d.Body)
+	h.Write(payload)
 	keys := make([]string, 0, len(headers))
 	for k := range headers {
 		keys = append(keys, k)
