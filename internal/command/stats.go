@@ -42,6 +42,12 @@ default_queue is used.`,
 			fmt.Fprintf(tw, "Queue:\t%s\n", stats.Queue)
 			fmt.Fprintf(tw, "Messages:\t%d\n", stats.Messages)
 			fmt.Fprintf(tw, "Consumers:\t%d\n", stats.Consumers)
+			// Pending (delivered but unacknowledged, e.g. Redis consumer-group
+			// PELs) is only rendered by brokers that report it — a missing line
+			// means the broker does not track it, not that it is zero.
+			if stats.Pending > 0 {
+				fmt.Fprintf(tw, "Pending:\t%d\n", stats.Pending)
+			}
 			// Message age is not exposed by the AMQP protocol in this phase.
 			fmt.Fprintf(tw, "Oldest age:\tn/a\n")
 			fmt.Fprintf(tw, "Newest age:\tn/a\n")

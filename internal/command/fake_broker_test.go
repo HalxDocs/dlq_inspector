@@ -34,6 +34,9 @@ type fakeBroker struct {
 	ackErr error
 	// statsErr, when set, is returned by Stats for any queue.
 	statsErr error
+	// statsPending is added to every Stats result, so tests can exercise the
+	// pending rendering without a live broker.
+	statsPending int
 }
 
 // publishCall records one Publish invocation.
@@ -104,7 +107,7 @@ func (f *fakeBroker) Stats(ctx context.Context, queue string) (broker.QueueStats
 	}
 	for _, q := range f.queues {
 		if q.Name == queue {
-			return broker.QueueStats{Queue: q.Name, Messages: q.Messages, Consumers: q.Consumers}, nil
+			return broker.QueueStats{Queue: q.Name, Messages: q.Messages, Consumers: q.Consumers, Pending: f.statsPending}, nil
 		}
 	}
 	return broker.QueueStats{}, fmt.Errorf("queue %q not found: %w", queue, broker.ErrQueueNotFound)

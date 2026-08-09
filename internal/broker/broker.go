@@ -74,6 +74,10 @@ type QueueStats struct {
 	Queue     string
 	Messages  int
 	Consumers int
+	// Pending is the total number of messages delivered to a consumer but not
+	// yet acknowledged — e.g. the sum of Redis Streams consumer-group PELs.
+	// 0 when the broker does not report it or nothing is pending.
+	Pending   int
 	OldestAge time.Duration
 	NewestAge time.Duration
 	// RetryCount is the average retry count across the queue's messages.

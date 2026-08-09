@@ -6,7 +6,8 @@ import (
 	"time"
 
 	"github.com/HalxDocs/dlq_inspector/internal/broker"
-	_ "github.com/HalxDocs/dlq_inspector/internal/broker/rabbitmq" // register adapter factories
+	_ "github.com/HalxDocs/dlq_inspector/internal/broker/rabbitmq"    // register adapter factories
+	_ "github.com/HalxDocs/dlq_inspector/internal/broker/redisstream" // register adapter factories
 	"github.com/HalxDocs/dlq_inspector/internal/config"
 )
 

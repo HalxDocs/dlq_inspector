@@ -84,6 +84,38 @@ func TestStats(t *testing.T) {
 	}
 }
 
+func TestStatsShowsPending(t *testing.T) {
+	cfgPath := brokerTestConfig(t)
+	fb := &fakeBroker{queues: []broker.QueueSummary{{Name: "orders-dlq", Messages: 3, Consumers: 1}}, statsPending: 2}
+	withFakeBroker(t, fb)
+
+	out, err := runCommand(t, "stats", "orders-dlq", "--config", cfgPath)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	for _, want := range []string{"Pending:", "2", "Consumers:", "1"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestStatsOmitsPendingWhenUnreported(t *testing.T) {
+	// Brokers that do not track pending (e.g. RabbitMQ's AMQP path) must not
+	// render a misleading "Pending: 0" line.
+	cfgPath := brokerTestConfig(t)
+	fb := &fakeBroker{queues: []broker.QueueSummary{{Name: "orders-dlq", Messages: 7}}}
+	withFakeBroker(t, fb)
+
+	out, err := runCommand(t, "stats", "orders-dlq", "--config", cfgPath)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if strings.Contains(out, "Pending") {
+		t.Errorf("output shows Pending for a broker that does not report it:\n%s", out)
+	}
+}
+
 func TestStatsUsesDefaultQueue(t *testing.T) {
 	cfgPath := brokerTestConfig(t)
 	fb := &fakeBroker{queues: []broker.QueueSummary{{Name: "orders-dlq", Messages: 7}}}

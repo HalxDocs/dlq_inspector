@@ -112,6 +112,12 @@ func (a *Adapter) Stats(ctx context.Context, queue string) (broker.QueueStats, e
 	if groups, err := a.conn.client.XInfoGroups(ctx, queue).Result(); err == nil {
 		for _, g := range groups {
 			stats.Consumers += int(g.Consumers)
+			// XPENDING per group: entries delivered to a consumer but not yet
+			// acknowledged — work in flight or stuck in the group's PEL. Summed
+			// across groups this is the total in-flight/unprocessed work.
+			if p, err := a.conn.client.XPending(ctx, queue, g.Name).Result(); err == nil {
+				stats.Pending += int(p.Count)
+			}
 		}
 	}
 	return stats, nil
