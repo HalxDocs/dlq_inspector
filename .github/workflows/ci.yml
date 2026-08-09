@@ -40,4 +40,8 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        run: go test ./...
+        # -count=1: setup-go persists the Go cache across runs, and go test's
+        # result cache does not include environment variables in its key -- a
+        # run where the live-broker tests skipped could otherwise be cached as
+        # "ok" and mask the skip forever. Uncounted runs always execute.
+        run: go test -count=1 ./...
