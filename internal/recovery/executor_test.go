@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/time/rate"
@@ -303,6 +304,38 @@ func TestExecuteAuditsSkips(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("no skipped audit entry for gone; entries = %+v", entries)
+	}
+}
+
+func TestExecuteAuditsPlanExclusions(t *testing.T) {
+	store := execStore(t)
+	b := &valBroker{msgs: map[string][]message.Message{"orders-dlq": execMsgs("m1", "m2")}}
+	p := execPlan("m1", "m2")
+	p.Excluded = []ExcludedMessage{
+		{MessageID: "m-dup", Classification: DoNotReplay, Reason: "message header x-duplicate-of marks it as a duplicate of evt_42"},
+	}
+	ex := Executor{Broker: b, Audit: store}
+
+	res, err := ex.Execute(context.Background(), p, ExecutorOptions{Confirm: true, BatchSize: 2, RateLimit: "0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Replayed != 2 || res.Excluded != 1 {
+		t.Errorf("result = %+v, want 2 replayed and 1 excluded", res)
+	}
+
+	entries, _ := store.Recent(100)
+	found := false
+	for _, e := range entries {
+		if e.MessageID == "m-dup" && e.Result == "skipped" && e.PlanID == "plan_exec" {
+			found = true
+			if !strings.Contains(e.Reason, "x-duplicate-of") {
+				t.Errorf("skip reason = %q, want the classifier reason", e.Reason)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("no skipped audit entry for the excluded message; entries = %+v", entries)
 	}
 }
 

@@ -99,6 +99,34 @@ func TestPlanGroupFilter(t *testing.T) {
 	}
 }
 
+func TestPlanReportsExclusions(t *testing.T) {
+	cfgPath, _ := replayTestConfig(t)
+	planPath := filepath.Join(t.TempDir(), "recovery.json")
+	msgs := []message.Message{
+		{ID: "m1", Queue: "orders-dlq", Destination: "orders", FailureReason: "rejected"},
+		{ID: "m2", Queue: "orders-dlq", Destination: "orders", FailureReason: "rejected"},
+		{ID: "m-dup", Queue: "orders-dlq", Destination: "orders", FailureReason: "rejected", Headers: map[string]string{"x-duplicate-of": "evt_42"}},
+	}
+	withFakeBroker(t, &fakeBroker{msgs: map[string][]message.Message{"orders-dlq": msgs}})
+
+	out, err := runCommand(t, "plan", "--config", cfgPath, "--output-file", planPath)
+	if err != nil {
+		t.Fatalf("plan: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "2 messages selected), 1 excluded (left in DLQ)") {
+		t.Errorf("plan output = %q, want the exclusion count", out)
+	}
+
+	// The dry-run report shows the exclusion too.
+	out, err = runCommand(t, "recover", "--plan", planPath, "--config", cfgPath)
+	if err != nil {
+		t.Fatalf("recover: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Excluded:") || !strings.Contains(out, "1") {
+		t.Errorf("dry-run output missing exclusion line:\n%s", out)
+	}
+}
+
 func TestPlanUnknownGroupFails(t *testing.T) {
 	cfgPath, _ := replayTestConfig(t)
 	withFakeBroker(t, &fakeBroker{msgs: map[string][]message.Message{"orders-dlq": planFixture()}})

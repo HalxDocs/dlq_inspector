@@ -134,6 +134,9 @@ func renderRecoverReport(cmd *cobra.Command, planPath string, p *recovery.Recove
 	if res.Duplicates > 0 {
 		fmt.Fprintf(tw, "Duplicate warning:\t%d\n", res.Duplicates)
 	}
+	if len(p.Excluded) > 0 {
+		fmt.Fprintf(tw, "Excluded:\t%d (left in DLQ)\n", len(p.Excluded))
+	}
 	fmt.Fprintf(tw, "Messages that will be skipped:\t%d\n", res.Skipped)
 	fmt.Fprintf(tw, "Messages to replay:\t%d\n", res.ToReplay)
 	if len(res.ChecksRun) > 0 {
@@ -171,6 +174,9 @@ func renderRecoverSummary(cmd *cobra.Command, planPath string, p *recovery.Recov
 	fmt.Fprintf(tw, "Selected:\t%d\n", res.Selected)
 	fmt.Fprintf(tw, "Replayed:\t%d\n", res.Replayed)
 	fmt.Fprintf(tw, "Skipped:\t%d\n", res.Skipped)
+	if res.Excluded > 0 {
+		fmt.Fprintf(tw, "Excluded:\t%d (left in DLQ)\n", res.Excluded)
+	}
 	fmt.Fprintf(tw, "Failed during replay:\t%d\n", res.Failed)
 	fmt.Fprintf(tw, "New DLQ entries:\t%d\n", res.NewDLQEntries)
 	fmt.Fprintf(tw, "Duration:\t%s\n", res.Duration.Round(time.Millisecond))

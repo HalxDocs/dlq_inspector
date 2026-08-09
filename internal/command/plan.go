@@ -93,7 +93,11 @@ DO_NOT_REPLAY are excluded unless --include-do-not-replay is given.`,
 				return fmt.Errorf("record plan in audit: %w", err)
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "Plan written: %s (%d messages selected)\n", output, len(p.MessageIDs))
+			msg := fmt.Sprintf("Plan written: %s (%d messages selected)", output, len(p.MessageIDs))
+			if len(p.Excluded) > 0 {
+				msg += fmt.Sprintf(", %d excluded (left in DLQ)", len(p.Excluded))
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), msg)
 			fmt.Fprintf(cmd.OutOrStdout(), "Plan ID: %s\n", p.ID)
 			fmt.Fprintf(cmd.OutOrStdout(), "Review it, then run: dlq recover --plan %s --dry-run\n", output)
 			return nil

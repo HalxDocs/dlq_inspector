@@ -45,6 +45,10 @@ type RecoveryPlan struct {
 	GroupLabel string `json:"group_label,omitempty"`
 	// MessageIDs are the exact messages selected for recovery.
 	MessageIDs []string `json:"message_ids"`
+	// Excluded lists the messages deliberately not selected, with the
+	// classification and reason — so a plan documents what it left in the
+	// DLQ and why.
+	Excluded []ExcludedMessage `json:"excluded,omitempty"`
 	// Destination is where the messages will be replayed to.
 	Destination string `json:"destination"`
 	// Action is "replay" today; "patch_and_replay" arrives with payload
@@ -55,6 +59,14 @@ type RecoveryPlan struct {
 	// SafetyChecks lists the checks the validator must run before execution.
 	// A plan with an empty SafetyChecks list is rejected.
 	SafetyChecks []string `json:"safety_checks"`
+}
+
+// ExcludedMessage records one message the planner deliberately left out of a
+// plan and why.
+type ExcludedMessage struct {
+	MessageID      string         `json:"message_id"`
+	Classification Classification `json:"classification"`
+	Reason         string         `json:"reason"`
 }
 
 // PlanChecks are the safety checks a plan declares and the validator performs.
@@ -104,6 +116,7 @@ func BuildPlan(msgs []message.Message, opts PlanOptions) (*RecoveryPlan, error) 
 
 	destinations := map[string]bool{}
 	var ids []string
+	var excluded []ExcludedMessage
 	firstSig := ""
 	for i := range msgs {
 		m := &msgs[i]
@@ -111,7 +124,13 @@ func BuildPlan(msgs []message.Message, opts PlanOptions) (*RecoveryPlan, error) 
 		if opts.GroupID != "" && groupID(sig) != opts.GroupID {
 			continue
 		}
-		if !opts.IncludeDoNotReplay && Classify(m).Classification == DoNotReplay {
+		cls := Classify(m)
+		if !opts.IncludeDoNotReplay && cls.Classification == DoNotReplay {
+			excluded = append(excluded, ExcludedMessage{
+				MessageID:      m.ID,
+				Classification: DoNotReplay,
+				Reason:         cls.Reason,
+			})
 			continue
 		}
 		if firstSig == "" {
@@ -153,6 +172,7 @@ func BuildPlan(msgs []message.Message, opts PlanOptions) (*RecoveryPlan, error) 
 		GroupID:      opts.GroupID,
 		GroupLabel:   label,
 		MessageIDs:   ids,
+		Excluded:     excluded,
 		Destination:  dest,
 		Action:       "replay",
 		Limits:       opts.Limits,

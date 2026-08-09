@@ -64,10 +64,13 @@ type ExecutorOptions struct {
 	Reason string
 } // ExecutionResult summarizes one confirmed run.
 type ExecutionResult struct {
-	PlanID             string        `json:"plan_id"`
-	Selected           int           `json:"selected"`
-	Replayed           int           `json:"replayed"`
-	Skipped            int           `json:"skipped"`
+	PlanID   string `json:"plan_id"`
+	Selected int    `json:"selected"`
+	Replayed int    `json:"replayed"`
+	Skipped  int    `json:"skipped"`
+	// Excluded counts messages the plan deliberately left in the DLQ
+	// (DO_NOT_REPLAY); each gets a skipped audit entry with the reason.
+	Excluded           int           `json:"excluded"`
 	Failed             int           `json:"failed"`
 	NewDLQEntries      int           `json:"new_dlq_entries"`
 	Tripped            bool          `json:"tripped"`
@@ -145,6 +148,14 @@ func (e Executor) Execute(ctx context.Context, plan *RecoveryPlan, opts Executor
 	for _, s := range vres.SkippedMessages {
 		res.Skipped++
 		e.audit(plan, s.MessageID, "skipped", opts, detailFor(s))
+	}
+
+	// Audit the plan's exclusions: messages deliberately left in the DLQ
+	// (DO_NOT_REPLAY). They never reached validation, but the trail must
+	// show that the recovery chose not to touch them, and why.
+	for _, x := range plan.Excluded {
+		res.Excluded++
+		e.audit(plan, x.MessageID, "skipped", opts, x.Reason)
 	}
 
 	// Execute in batches; the circuit breaker checks each batch.

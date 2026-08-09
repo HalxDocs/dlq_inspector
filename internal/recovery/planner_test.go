@@ -34,6 +34,11 @@ func TestBuildPlanAllGroupsExcludesDoNotReplay(t *testing.T) {
 			t.Error("DO_NOT_REPLAY message selected")
 		}
 	}
+	// The exclusion is recorded on the plan with its reason.
+	if len(plan.Excluded) != 1 || plan.Excluded[0].MessageID != "m4" ||
+		plan.Excluded[0].Classification != DoNotReplay || plan.Excluded[0].Reason == "" {
+		t.Errorf("excluded = %+v, want m4 recorded as DO_NOT_REPLAY", plan.Excluded)
+	}
 	if plan.Destination != "orders" {
 		t.Errorf("destination = %q", plan.Destination)
 	}
@@ -68,6 +73,29 @@ func TestBuildPlanIncludeDoNotReplay(t *testing.T) {
 	}
 	if len(plan.MessageIDs) != 5 {
 		t.Fatalf("message_ids = %v, want all 5 with IncludeDoNotReplay", plan.MessageIDs)
+	}
+	if len(plan.Excluded) != 0 {
+		t.Errorf("excluded = %+v, want none when including DO_NOT_REPLAY", plan.Excluded)
+	}
+}
+
+func TestBuildPlanRecordsHeaderDuplicateExclusion(t *testing.T) {
+	// A message the application itself marks as a duplicate (x-duplicate-of
+	// header) is excluded and recorded, even though its broker-set failure
+	// text would normally classify it REQUIRES_FIX.
+	msgs := []message.Message{
+		{ID: "good", Destination: "orders", FailureReason: "rejected"},
+		{ID: "dup", Destination: "orders", FailureReason: "rejected", Headers: map[string]string{"x-duplicate-of": "evt_42"}},
+	}
+	plan, err := BuildPlan(msgs, PlanOptions{Queue: "orders-dlq"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.MessageIDs) != 1 || plan.MessageIDs[0] != "good" {
+		t.Errorf("message_ids = %v, want only good", plan.MessageIDs)
+	}
+	if len(plan.Excluded) != 1 || plan.Excluded[0].MessageID != "dup" || plan.Excluded[0].Classification != DoNotReplay {
+		t.Errorf("excluded = %+v, want dup recorded", plan.Excluded)
 	}
 }
 
