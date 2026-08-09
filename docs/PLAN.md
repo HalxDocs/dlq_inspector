@@ -306,19 +306,27 @@ and leaves it in the DLQ.
 
 **Outcome:** a second broker behind the same interface, proving broker-agnosticism.
 
-**Exit gate:**
-- `internal/broker/redisstream` implements the full `Broker` interface (XADD/XREADGROUP/
-  XCLAIM/XACK); DLQ pattern via separate stream + consumer-group semantics.
+**Exit gate (done):**
+- `internal/broker/redisstream` implements the full `Broker` interface over Redis
+  Streams (`go-redis/v9`): streams are queues, entries carry payload + dead-letter
+  metadata (destination, error, retries, headers) as fields, replay is XADD to the
+  destination then XDEL the DLQ copy. Stats probes existence with EXISTS and wraps
+  `broker.ErrQueueNotFound`, so the destination-existence invariant holds.
 - The shared conformance suite (`internal/broker/conformance_test.go`) passes green
-  against real Redis.
+  against real Redis — and was extended to cover the real contract (Publish/Search/
+  Inspect/Stats/Ack over a per-adapter fixture), so it now enforces the cycle the
+  recovery engine depends on for every adapter.
 - `analyze / plan / recover` work against Redis Streams **with zero changes** to
-  analyzer/classifier/planner/executor code.
+  analyzer/classifier/planner/validator/executor code, proven by the live
+  `TestRecoveryLoopOverRedis` (analyze -> plan -> dry-run -> confirm -> history,
+  including the DO_NOT_REPLAY exclusion) gated in CI alongside the RabbitMQ loops.
 
-**Tests:** conformance suite; recovery-engine integration over the Redis adapter.
+**Tests:** conformance suite (RabbitMQ + Redis); recovery-engine integration over
+both adapters.
 
-**Notes:** consumer groups map to queue semantics; unacked/XCLAIM claims map to the
-inspect/replay flow. Kafka (Phase 2 of the spec's rollout) and SQS follow later under
-the same rule: implement the interface + pass conformance, no engine changes.
+**Notes:** the tool owns the DLQ outright — no consumer groups are involved in the
+inspect/replay flow. Kafka and SQS follow later under the same rule: implement the
+interface + pass conformance, no engine changes.
 
 ---
 

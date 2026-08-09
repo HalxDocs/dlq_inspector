@@ -15,16 +15,21 @@ jobs:
         ports:
           - 5672:5672
           - 15672:15672
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
 
     env:
       # Dual-mode test hooks: unit and safety tests never need these, and the
-      # integration suites skip when they are absent, but CI provides a real
-      # broker so the full integration surface runs on every push: the
-      # adapter conformance suite, the publish/ack write path, and the
-      # end-to-end recovery loop (analyze -> plan -> dry-run -> confirm ->
-      # history) in internal/broker/rabbitmq/recovery_integration_test.go.
+      # integration suites skip when they are absent, but CI provides real
+      # brokers so the full integration surface runs on every push: the
+      # adapter conformance suites, the publish/ack write paths, and the
+      # end-to-end recovery loops (analyze -> plan -> dry-run -> confirm ->
+      # history) for RabbitMQ and Redis Streams.
       DLQ_TEST_AMQP_URL: amqp://guest:guest@localhost:5672/
       DLQ_TEST_MANAGEMENT_URL: http://guest:guest@localhost:15672/
+      DLQ_TEST_REDIS_URL: redis://localhost:6379/0
 
     steps:
       - uses: actions/checkout@v4
@@ -47,15 +52,16 @@ jobs:
         run: go test -count=1 ./...
 
       # The end-to-end recovery loop is the v0.1 gate: analyze -> plan -> dry-run
-      # -> confirm-recover -> history against a real broker, plus the
-      # missing-destination refusal scenarios for both the batch recover and
-      # the single-message replay paths, and the policy-driven DO_NOT_REPLAY
-      # scenario. Run each explicitly and fail the workflow if any ever
-      # skips, so a silent skip can never pass as coverage.
+      # -> confirm-recover -> history against real brokers, plus the
+      # missing-destination refusal scenarios, the single-message replay
+      # refusal, the policy-driven DO_NOT_REPLAY scenario, and the same loop
+      # over Redis Streams. Run each explicitly and fail the workflow if any
+      # ever skips, so a silent skip can never pass as coverage.
       - name: "Integration: full recovery loop"
         run: |
-          go test -count=1 -v -run 'TestRecoveryLoop(EndToEnd|MissingDestination|Policy)|TestReplayMissingDestinationLive' ./internal/broker/rabbitmq/ | tee /tmp/recovery-test.log
+          go test -count=1 -v -run 'TestRecoveryLoop(EndToEnd|MissingDestination|Policy|OverRedis)|TestReplayMissingDestinationLive' ./internal/broker/... | tee /tmp/recovery-test.log
           grep -- '--- PASS: TestRecoveryLoopEndToEnd' /tmp/recovery-test.log
           grep -- '--- PASS: TestRecoveryLoopMissingDestination' /tmp/recovery-test.log
           grep -- '--- PASS: TestRecoveryLoopPolicy' /tmp/recovery-test.log
+          grep -- '--- PASS: TestRecoveryLoopOverRedis' /tmp/recovery-test.log
           grep -- '--- PASS: TestReplayMissingDestinationLive' /tmp/recovery-test.log
