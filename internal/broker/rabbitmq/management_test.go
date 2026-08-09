@@ -1,7 +1,11 @@
 package rabbitmq
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -115,5 +119,35 @@ func TestManagementClientEscapesSlashVhost(t *testing.T) {
 	}
 	if got := c.encodedVhost; got != url.PathEscape("my/vhost") {
 		t.Errorf("vhost = %q", got)
+	}
+}
+
+// TestListQueuesMapsPending pins the RabbitMQ side of the pending surface:
+// the management API's messages_unacknowledged (deliveries in flight) must
+// land in QueueSummary.Pending, the same signal the Redis adapter reports
+// from consumer-group PELs.
+func TestListQueuesMapsPending(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `[{"name":"orders","durable":true,"auto_delete":false,"messages":42,"consumers":1,"messages_unacknowledged":7}]`)
+	}))
+	defer srv.Close()
+
+	c := &managementClient{
+		baseURL:      srv.URL,
+		user:         "guest",
+		pass:         "guest",
+		encodedVhost: "%2F",
+		http:         srv.Client(),
+	}
+	qs, err := c.listQueues(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(qs) != 1 {
+		t.Fatalf("queues = %d, want 1", len(qs))
+	}
+	if qs[0].Pending != 7 || qs[0].Messages != 42 || qs[0].Consumers != 1 {
+		t.Errorf("summary = %+v, want messages 42, consumers 1, pending 7", qs[0])
 	}
 }

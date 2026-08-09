@@ -28,11 +28,12 @@ type managementClient struct {
 
 // mgmtQueue mirrors the subset of the /api/queues payload we need.
 type mgmtQueue struct {
-	Name       string `json:"name"`
-	Durable    bool   `json:"durable"`
-	AutoDelete bool   `json:"auto_delete"`
-	Messages   int    `json:"messages"`
-	Consumers  int    `json:"consumers"`
+	Name                   string `json:"name"`
+	Durable                bool   `json:"durable"`
+	AutoDelete             bool   `json:"auto_delete"`
+	Messages               int    `json:"messages"`
+	Consumers              int    `json:"consumers"`
+	MessagesUnacknowledged int    `json:"messages_unacknowledged"`
 }
 
 // newManagementClient derives the management base URL, credentials, and vhost
@@ -107,6 +108,9 @@ func (m *managementClient) listQueues(ctx context.Context) ([]broker.QueueSummar
 			AutoDelete: q.AutoDelete,
 			Messages:   q.Messages,
 			Consumers:  q.Consumers,
+			// Unacknowledged messages are deliveries in flight — the same
+			// "pending work" the Redis adapter reports from group PELs.
+			Pending: q.MessagesUnacknowledged,
 		})
 	}
 	return queues, nil

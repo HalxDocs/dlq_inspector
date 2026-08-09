@@ -24,8 +24,8 @@ func brokerTestConfig(t *testing.T) string {
 func TestQueuesListsSorted(t *testing.T) {
 	cfgPath := brokerTestConfig(t)
 	fb := &fakeBroker{queues: []broker.QueueSummary{
-		{Name: "orders-dlq", Durable: true, Messages: 482, Consumers: 0},
-		{Name: "orders", Durable: true, Messages: 42, Consumers: 1},
+		{Name: "orders-dlq", Durable: true, Messages: 482, Consumers: 0, Pending: 12},
+		{Name: "orders", Durable: true, Messages: 42, Consumers: 1, Pending: 3},
 	}}
 	withFakeBroker(t, fb)
 
@@ -36,7 +36,7 @@ func TestQueuesListsSorted(t *testing.T) {
 	if strings.Index(out, "orders") > strings.Index(out, "orders-dlq") {
 		t.Errorf("queues not sorted alphabetically:\n%s", out)
 	}
-	for _, want := range []string{"orders", "orders-dlq", "482", "42", "1", "true"} {
+	for _, want := range []string{"orders", "orders-dlq", "482", "42", "1", "true", "PENDING", "12", "3"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}

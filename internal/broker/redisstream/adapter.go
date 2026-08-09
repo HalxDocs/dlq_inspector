@@ -56,7 +56,8 @@ func (a *Adapter) Close() error {
 }
 
 // ListQueues lists streams visible to the connection (SCAN TYPE STREAM) with
-// each stream's depth and total consumers across its consumer groups.
+// each stream's depth, total consumers, and total pending (unacknowledged)
+// entries across its consumer groups.
 func (a *Adapter) ListQueues(ctx context.Context) ([]broker.QueueSummary, error) {
 	if a.conn == nil {
 		return nil, ErrNotConnected
@@ -73,6 +74,12 @@ func (a *Adapter) ListQueues(ctx context.Context) ([]broker.QueueSummary, error)
 		if groups, err := a.conn.client.XInfoGroups(ctx, name).Result(); err == nil {
 			for _, g := range groups {
 				qs.Consumers += int(g.Consumers)
+				// XPENDING per group: entries delivered to a consumer but not
+				// yet acknowledged — work in flight or stuck in the group's
+				// PEL. Same signal Stats reports.
+				if p, err := a.conn.client.XPending(ctx, name, g.Name).Result(); err == nil {
+					qs.Pending += int(p.Count)
+				}
 			}
 		}
 		out = append(out, qs)

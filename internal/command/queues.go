@@ -38,9 +38,9 @@ func newQueuesCmd(opts *GlobalOptions) *cobra.Command {
 			}
 
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
-			fmt.Fprintln(tw, "NAME\tDURABLE\tAUTO-DELETE\tMESSAGES\tCONSUMERS")
+			fmt.Fprintln(tw, "NAME\tDURABLE\tAUTO-DELETE\tMESSAGES\tCONSUMERS\tPENDING")
 			for _, q := range queues {
-				fmt.Fprintf(tw, "%s\t%t\t%t\t%d\t%d\n", q.Name, q.Durable, q.AutoDelete, q.Messages, q.Consumers)
+				fmt.Fprintf(tw, "%s\t%t\t%t\t%d\t%d\t%d\n", q.Name, q.Durable, q.AutoDelete, q.Messages, q.Consumers, q.Pending)
 			}
 			return tw.Flush()
 		},

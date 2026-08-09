@@ -64,6 +64,10 @@ type QueueSummary struct {
 	AutoDelete bool
 	Messages   int
 	Consumers  int
+	// Pending is the number of messages delivered to a consumer but not yet
+	// acknowledged — unacknowledged deliveries (RabbitMQ) or the sum of
+	// consumer-group PELs (Redis Streams). 0 when nothing is pending.
+	Pending int
 	// DLQ is the associated dead-letter queue, when the queue has a
 	// dead-letter exchange binding.
 	DLQ string
