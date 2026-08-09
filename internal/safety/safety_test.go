@@ -21,6 +21,7 @@ type recordingBroker struct {
 	mu         sync.Mutex
 	msgs       map[string][]message.Message
 	published  []string
+	payloads   []string
 	acked      []string
 	publishErr error
 	ackErr     error
@@ -70,6 +71,7 @@ func (b *recordingBroker) Publish(ctx context.Context, destination string, m *me
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.published = append(b.published, m.ID)
+	b.payloads = append(b.payloads, string(m.Payload))
 	return b.publishErr
 }
 
@@ -375,6 +377,60 @@ func TestExecuteRefusesMissingDestination(t *testing.T) {
 	}
 	if !strings.Contains(entries[0].Reason, "orders") {
 		t.Errorf("refusal reason = %q, want the queue name", entries[0].Reason)
+	}
+}
+
+func TestExecutePublishesPatchedPayload(t *testing.T) {
+	// A patched replay publishes the override payload instead of the message
+	// body, still acks only after publish, and records the diff and action on
+	// the audit entry.
+	s := openAudit(t)
+	b := &recordingBroker{msgs: map[string][]message.Message{"orders-dlq": {dlqMessage()}}}
+	r := confirmedRequest(b, s)
+	r.Action = audit.ActionPatch
+	r.Payload = []byte(`{"order_id":123,"customer_id":443}`)
+	r.Diff = "- customer_id: 1000\n+ customer_id: 443\n"
+
+	res, err := Execute(context.Background(), r)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !res.Published || !res.Acked {
+		t.Errorf("Result = %+v, want published+acked", res)
+	}
+
+	b.mu.Lock()
+	payloads := append([]string(nil), b.payloads...)
+	acked := append([]string(nil), b.acked...)
+	b.mu.Unlock()
+	if len(payloads) != 1 || payloads[0] != string(r.Payload) {
+		t.Fatalf("published payloads = %v, want the patched payload", payloads)
+	}
+	if len(acked) != 1 {
+		t.Fatalf("acked = %v, want the DLQ copy acked after publish", acked)
+	}
+
+	if res.Audit.Action != audit.ActionPatch || res.Audit.PayloadDiff != r.Diff {
+		t.Errorf("audit entry = %+v, want action patch with the diff", res.Audit)
+	}
+}
+
+func TestDryRunRecordsDiff(t *testing.T) {
+	s := openAudit(t)
+	b := &recordingBroker{msgs: map[string][]message.Message{"orders-dlq": {dlqMessage()}}}
+	r := testRequest(b, s)
+	r.Action = audit.ActionPatch
+	r.Diff = "- customer_id: 1000\n+ customer_id: 443\n"
+
+	if _, err := DryRun(context.Background(), r); err != nil {
+		t.Fatalf("DryRun: %v", err)
+	}
+	entries, err := s.Recent(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Action != audit.ActionPatch || entries[0].PayloadDiff != r.Diff || !entries[0].DryRun {
+		t.Fatalf("audit entries = %+v, want a patch dry_run with the diff", entries)
 	}
 }
 

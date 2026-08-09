@@ -46,6 +46,9 @@ type Entry struct {
 	Broker      string    `json:"broker"`
 	Profile     string    `json:"profile"`
 	Reason      string    `json:"reason,omitempty"`
+	// PayloadDiff is the old->new payload diff for patched replays, so the
+	// trail shows exactly what was changed. Empty for unpatched operations.
+	PayloadDiff string `json:"payload_diff,omitempty"`
 }
 
 // Store is an append-only audit log backed by SQLite.
@@ -72,6 +75,10 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("audit: init store %s: %w", path, err)
 	}
+	if err := migrate(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("audit: migrate store %s: %w", path, err)
+	}
 	return &Store{path: path, db: db}, nil
 }
 
@@ -89,10 +96,51 @@ CREATE TABLE IF NOT EXISTS audit (
     result        TEXT NOT NULL DEFAULT '',
     broker        TEXT NOT NULL DEFAULT '',
     profile       TEXT NOT NULL DEFAULT '',
-    reason        TEXT NOT NULL DEFAULT ''
+    reason        TEXT NOT NULL DEFAULT '',
+    payload_diff  TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_audit_message ON audit(message_id, action);
 `
+
+// migrate adds columns introduced after the initial schema, so stores created
+// by older versions keep working instead of failing on INSERT.
+func migrate(db *sql.DB) error {
+	cols, err := tableColumns(db, "audit")
+	if err != nil {
+		return err
+	}
+	if !cols["payload_diff"] {
+		if _, err := db.Exec(`ALTER TABLE audit ADD COLUMN payload_diff TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add payload_diff column: %w", err)
+		}
+	}
+	return nil
+}
+
+// tableColumns returns the set of column names of a table.
+func tableColumns(db *sql.DB, table string) (map[string]bool, error) {
+	rows, err := db.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	cols := map[string]bool{}
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notnull int
+			dflt    any
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return nil, err
+		}
+		cols[name] = true
+	}
+	return cols, rows.Err()
+}
 
 // Close closes the underlying database.
 func (s *Store) Close() error {
@@ -109,8 +157,8 @@ func (s *Store) Append(e Entry) error {
 	}
 	_, err := s.db.Exec(
 		`INSERT INTO audit (timestamp, action, message_id, plan_id, source_queue, destination,
-		   dry_run, confirmed, result, broker, profile, reason)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		   dry_run, confirmed, result, broker, profile, reason, payload_diff)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.Timestamp.Format(time.RFC3339Nano),
 		string(e.Action),
 		e.MessageID,
@@ -123,6 +171,7 @@ func (s *Store) Append(e Entry) error {
 		e.Broker,
 		e.Profile,
 		e.Reason,
+		e.PayloadDiff,
 	)
 	if err != nil {
 		return fmt.Errorf("audit: append entry: %w", err)
@@ -134,7 +183,7 @@ func (s *Store) Append(e Entry) error {
 // negative means no limit).
 func (s *Store) Recent(limit int) ([]Entry, error) {
 	query := `SELECT timestamp, action, message_id, plan_id, source_queue, destination,
-	          dry_run, confirmed, result, broker, profile, reason
+	          dry_run, confirmed, result, broker, profile, reason, payload_diff
 	          FROM audit ORDER BY id DESC`
 	args := []any{}
 	if limit > 0 {
@@ -149,7 +198,7 @@ func (s *Store) Recent(limit int) ([]Entry, error) {
 // be reviewed in execution order.
 func (s *Store) ByPlan(planID string) ([]Entry, error) {
 	return s.query(`SELECT timestamp, action, message_id, plan_id, source_queue, destination,
-	          dry_run, confirmed, result, broker, profile, reason
+	          dry_run, confirmed, result, broker, profile, reason, payload_diff
 	          FROM audit
 	          WHERE plan_id = ?
 	          ORDER BY id ASC`,
@@ -162,7 +211,7 @@ func (s *Store) ByPlan(planID string) ([]Entry, error) {
 // single replay and batch recovery actions count.
 func (s *Store) Replayed(messageID string) ([]Entry, error) {
 	return s.query(`SELECT timestamp, action, message_id, plan_id, source_queue, destination,
-	          dry_run, confirmed, result, broker, profile, reason
+	          dry_run, confirmed, result, broker, profile, reason, payload_diff
 	          FROM audit
 	          WHERE message_id = ? AND action IN ('replay', 'recover') AND confirmed = 1 AND result = 'success'
 	          ORDER BY id DESC`,
@@ -184,9 +233,10 @@ func (s *Store) query(query string, args ...any) ([]Entry, error) {
 			planID, src, dest    string
 			dryRun, confirmed    int
 			broker, profile, rsn string
+			diff                 string
 		)
 		if err := rows.Scan(&ts, &action, &e.MessageID, &planID, &src, &dest,
-			&dryRun, &confirmed, &result, &broker, &profile, &rsn); err != nil {
+			&dryRun, &confirmed, &result, &broker, &profile, &rsn, &diff); err != nil {
 			return nil, fmt.Errorf("audit: scan entry: %w", err)
 		}
 		t, err := time.Parse(time.RFC3339Nano, ts)
@@ -206,6 +256,7 @@ func (s *Store) query(query string, args ...any) ([]Entry, error) {
 			Broker:      broker,
 			Profile:     profile,
 			Reason:      rsn,
+			PayloadDiff: diff,
 		})
 	}
 	return out, rows.Err()

@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -182,4 +183,88 @@ func mustRecent(t *testing.T, s *Store) []Entry {
 		t.Fatal(err)
 	}
 	return entries
+}
+
+func TestPayloadDiffRoundTrip(t *testing.T) {
+	s := openTestStore(t)
+	diff := "- customer_id: 1000\n+ customer_id: 443\n"
+	if err := s.Append(Entry{
+		Action: ActionPatch, MessageID: "m1", SourceQueue: "orders-dlq", Destination: "orders",
+		Confirmed: true, Result: "success", PayloadDiff: diff,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	recent := mustRecent(t, s)
+	if len(recent) != 1 || recent[0].PayloadDiff != diff {
+		t.Fatalf("entries = %+v, want the diff round-tripped", recent)
+	}
+}
+
+// oldSchema is the audit table as created before the payload_diff column
+// existed. Opening a store built from it must migrate the column in so old
+// stores keep working and new entries with diffs can be written.
+const oldSchema = `
+CREATE TABLE IF NOT EXISTS audit (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp     TEXT NOT NULL,
+    action        TEXT NOT NULL,
+    message_id    TEXT NOT NULL DEFAULT '',
+    plan_id       TEXT NOT NULL DEFAULT '',
+    source_queue  TEXT NOT NULL DEFAULT '',
+    destination   TEXT NOT NULL DEFAULT '',
+    dry_run       INTEGER NOT NULL DEFAULT 0,
+    confirmed     INTEGER NOT NULL DEFAULT 0,
+    result        TEXT NOT NULL DEFAULT '',
+    broker        TEXT NOT NULL DEFAULT '',
+    profile       TEXT NOT NULL DEFAULT '',
+    reason        TEXT NOT NULL DEFAULT ''
+);
+`
+
+func TestMigrateAddsPayloadDiff(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(oldSchema); err != nil {
+		t.Fatal(err)
+	}
+	// An entry written by the old version, before the column existed.
+	if _, err := db.Exec(
+		`INSERT INTO audit (timestamp, action, message_id, plan_id, source_queue, destination,
+		   dry_run, confirmed, result, broker, profile, reason)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		time.Now().UTC().Format(time.RFC3339Nano), "replay", "m1", "", "orders-dlq", "orders",
+		0, 1, "success", "rabbitmq", "dev", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Open(path) // Open runs the migration
+	if err != nil {
+		t.Fatalf("Open after migration: %v", err)
+	}
+	defer s.Close()
+
+	// Writing an entry with a diff works on the migrated store.
+	diff := "- customer_id: 1000\n+ customer_id: 443\n"
+	if err := s.Append(Entry{Action: ActionPatch, MessageID: "m2", SourceQueue: "orders-dlq", Result: "success", PayloadDiff: diff}); err != nil {
+		t.Fatalf("Append after migration: %v", err)
+	}
+
+	recent := mustRecent(t, s)
+	if len(recent) != 2 {
+		t.Fatalf("entries = %d, want the pre-migration entry plus the new one", len(recent))
+	}
+	// Newest first: the new entry round-trips its diff; the old entry (from
+	// before the column existed) reads back with an empty diff.
+	if recent[0].MessageID != "m2" || recent[0].PayloadDiff != diff {
+		t.Errorf("new entry = %+v", recent[0])
+	}
+	if recent[1].MessageID != "m1" || recent[1].PayloadDiff != "" {
+		t.Errorf("old entry = %+v", recent[1])
+	}
 }

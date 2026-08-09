@@ -46,6 +46,16 @@ type Request struct {
 	Reason string
 	// Confirm must be true for Execute to run.
 	Confirm bool
+	// Action is the audit action recorded for this operation. Zero value
+	// means audit.ActionReplay — the default for the replay/patch family.
+	Action audit.Action
+	// Payload, when non-nil, is published instead of the message's own
+	// payload (patched replay). The command layer computes it; the gate
+	// applies the same safety checks and publishes it as-is.
+	Payload []byte
+	// Diff is the old->new payload diff for patched replays, recorded on
+	// audit entries so the trail shows exactly what was changed.
+	Diff string
 }
 
 // ErrConfirmRequired is returned when Execute is called without an explicit
@@ -156,7 +166,15 @@ func Execute(ctx context.Context, r Request) (*Result, error) {
 	}
 
 	// Publish first. If this fails, the DLQ copy is untouched — never acked.
-	if err := r.Broker.Publish(ctx, dest, m); err != nil {
+	// A patched payload override is published instead of the original body;
+	// everything else (headers, ID, destination) is unchanged.
+	pub := m
+	if r.Payload != nil {
+		cp := *m
+		cp.Payload = r.Payload
+		pub = &cp
+	}
+	if err := r.Broker.Publish(ctx, dest, pub); err != nil {
 		appendFailure(r, m, dest, "publish_failed")
 		return nil, fmt.Errorf("replay failed at publish (DLQ message left in place): %w", err)
 	}
@@ -171,7 +189,7 @@ func Execute(ctx context.Context, r Request) (*Result, error) {
 
 	entry := audit.Entry{
 		Timestamp:   time.Now().UTC(),
-		Action:      audit.ActionReplay,
+		Action:      r.action(),
 		MessageID:   m.ID,
 		SourceQueue: r.Queue,
 		Destination: dest,
@@ -180,6 +198,7 @@ func Execute(ctx context.Context, r Request) (*Result, error) {
 		Broker:      r.BrokerName,
 		Profile:     r.Profile,
 		Reason:      r.Reason,
+		PayloadDiff: r.Diff,
 	}
 	if r.Audit != nil {
 		_ = r.Audit.Append(entry)
@@ -221,7 +240,7 @@ func duplicateWarnings(dup dedupe.Evidence) []string {
 func dryRunEntry(r Request, m *message.Message, dest string) audit.Entry {
 	return audit.Entry{
 		Timestamp:   time.Now().UTC(),
-		Action:      audit.ActionReplay,
+		Action:      r.action(),
 		MessageID:   m.ID,
 		SourceQueue: r.Queue,
 		Destination: dest,
@@ -230,6 +249,7 @@ func dryRunEntry(r Request, m *message.Message, dest string) audit.Entry {
 		Broker:      r.BrokerName,
 		Profile:     r.Profile,
 		Reason:      r.Reason,
+		PayloadDiff: r.Diff,
 	}
 }
 
@@ -239,7 +259,7 @@ func appendFailure(r Request, m *message.Message, dest, result string) {
 	}
 	_ = r.Audit.Append(audit.Entry{
 		Timestamp:   time.Now().UTC(),
-		Action:      audit.ActionReplay,
+		Action:      r.action(),
 		MessageID:   m.ID,
 		SourceQueue: r.Queue,
 		Destination: dest,
@@ -248,6 +268,7 @@ func appendFailure(r Request, m *message.Message, dest, result string) {
 		Broker:      r.BrokerName,
 		Profile:     r.Profile,
 		Reason:      r.Reason,
+		PayloadDiff: r.Diff,
 	})
 }
 
@@ -265,7 +286,7 @@ func appendRefusal(r Request, m *message.Message, dest, detail string) {
 	}
 	_ = r.Audit.Append(audit.Entry{
 		Timestamp:   time.Now().UTC(),
-		Action:      audit.ActionReplay,
+		Action:      r.action(),
 		MessageID:   m.ID,
 		SourceQueue: r.Queue,
 		Destination: dest,
@@ -274,5 +295,14 @@ func appendRefusal(r Request, m *message.Message, dest, detail string) {
 		Broker:      r.BrokerName,
 		Profile:     r.Profile,
 		Reason:      reason,
+		PayloadDiff: r.Diff,
 	})
+}
+
+// action returns the audit action for this request, defaulting to replay.
+func (r Request) action() audit.Action {
+	if r.Action == "" {
+		return audit.ActionReplay
+	}
+	return r.Action
 }
