@@ -237,6 +237,122 @@ func TestRecoveryLoopMissingDestination(t *testing.T) {
 	}
 }
 
+// TestRecoveryLoopPolicy proves the policy gate end to end: a message that
+// the classifier would mark REQUIRES_FIX (failure reason "rejected") is
+// flipped to DO_NOT_REPLAY by a profile-bound policy, excluded from the
+// plan with the rule as its reason, and left untouched in the DLQ by the
+// confirmed run — while the policy-independent message replays normally.
+func TestRecoveryLoopPolicy(t *testing.T) {
+	url := os.Getenv("DLQ_TEST_AMQP_URL")
+	mgmtURL := os.Getenv("DLQ_TEST_MANAGEMENT_URL")
+	if url == "" || mgmtURL == "" {
+		t.Skip("DLQ_TEST_AMQP_URL / DLQ_TEST_MANAGEMENT_URL not set")
+	}
+
+	conn, err := amqp.Dial(url)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+	ch, err := conn.Channel()
+	if err != nil {
+		t.Fatalf("channel: %v", err)
+	}
+	defer ch.Close()
+
+	// Two failing messages: one plain (REQUIRES_FIX by the classifier), one
+	// carrying an event type the policy marks DO_NOT_REPLAY.
+	f := newRecoveryFixture(t, ch)
+	f.deadLetter(t, ch, []amqp.Publishing{
+		{ContentType: "application/json", DeliveryMode: amqp.Persistent, Body: []byte(`{"order_id":1,"customer_id":1001}`)},
+		{ContentType: "application/json", DeliveryMode: amqp.Persistent, Body: []byte(`{"order_id":2,"customer_id":1002}`), Headers: amqp.Table{
+			"x-event-type": "order.cancelled",
+		}},
+	}, 2)
+
+	// The policy: order.cancelled events are never replayed. Validate it the
+	// way CI would, then bind it to the profile.
+	policyPath := filepath.Join(t.TempDir(), "policy.yaml")
+	if err := os.WriteFile(policyPath, []byte("rules:\n  - when: event_type == order.cancelled\n    action: do_not_replay\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cli := newRecoveryCLI(t, url, mgmtURL, f.dlq)
+	runCLI := func(t *testing.T, args ...string) string { return cli.run(t, args...) }
+
+	out := runCLI(t, "policy", "validate", policyPath, "--config", cli.cfgPath)
+	if !strings.Contains(out, "valid (1 rule)") {
+		t.Errorf("validate output = %q", out)
+	}
+	out = runCLI(t, "policy", "apply", policyPath, "--profile", "ci", "--config", cli.cfgPath)
+	if !strings.Contains(out, `Policy applied to profile "ci"`) {
+		t.Errorf("apply output = %q", out)
+	}
+
+	// ---- Analyze: the policy flips order.cancelled to DO_NOT_REPLAY while
+	// the plain message stays REQUIRES_FIX. ----
+	out = runCLI(t, "analyze", "--config", cli.cfgPath)
+	for _, want := range []string{"2 messages analyzed", "order.cancelled", "DO_NOT_REPLAY", "REQUIRES_FIX"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("analyze output missing %q:\n%s", want, out)
+		}
+	}
+
+	// ---- Plan: only the plain message is selected; the policy-excluded one
+	// is recorded with the rule as its reason. ----
+	planPath := filepath.Join(t.TempDir(), "recovery.json")
+	out = runCLI(t, "plan", "--config", cli.cfgPath, "--output-file", planPath)
+	if !strings.Contains(out, "1 messages selected") || !strings.Contains(out, "1 excluded (left in DLQ)") {
+		t.Errorf("plan output = %q", out)
+	}
+	planBytes, err := os.ReadFile(planPath)
+	if err != nil {
+		t.Fatalf("read plan: %v", err)
+	}
+	var plan recovery.RecoveryPlan
+	if err := json.Unmarshal(planBytes, &plan); err != nil {
+		t.Fatalf("parse plan: %v\n%s", err, planBytes)
+	}
+	if len(plan.MessageIDs) != 1 || len(plan.Excluded) != 1 {
+		t.Fatalf("plan = %+v, want 1 selected and 1 excluded", plan)
+	}
+	if !strings.Contains(plan.Excluded[0].Reason, "policy rule") {
+		t.Errorf("exclusion reason = %q, want the policy rule named", plan.Excluded[0].Reason)
+	}
+
+	// ---- Dry-run: validates the selected one, reports the exclusion, moves
+	// nothing. ----
+	out = runCLI(t, "recover", "--plan", planPath, "--config", cli.cfgPath)
+	for _, want := range []string{"1/1 passed", "Excluded:", "Messages to replay:", "1", "Changes made: NONE"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("dry-run output missing %q:\n%s", want, out)
+		}
+	}
+	waitQueueDepth(t, ch, f.dlq, 2)
+
+	// ---- Confirm: replays exactly one; the policy-excluded message stays in
+	// the DLQ. ----
+	out = runCLI(t, "recover", "--plan", planPath, "--confirm", "--rate-limit", "0", "--output", "json", "--config", cli.cfgPath)
+	var execRes recovery.ExecutionResult
+	if err := json.Unmarshal([]byte(out), &execRes); err != nil {
+		t.Fatalf("confirm output is not JSON: %v\n%s", err, out)
+	}
+	if execRes.Replayed != 1 || execRes.Excluded != 1 || execRes.Failed != 0 || execRes.Tripped {
+		t.Errorf("execution result = %+v, want 1 replayed and 1 excluded", execRes)
+	}
+	waitQueueDepth(t, ch, f.dlq, 1)
+	waitQueueDepth(t, ch, f.source, 1)
+
+	// ---- History: one success plus the policy-driven skip. ----
+	out = runCLI(t, "history", "--plan", plan.ID, "--config", cli.cfgPath)
+	if got := strings.Count(out, "success"); got != 1 {
+		t.Errorf("history has %d success entries, want 1:\n%s", got, out)
+	}
+	if !strings.Contains(out, "skipped") || !strings.Contains(out, "policy") {
+		t.Errorf("history missing the policy skip:\n%s", out)
+	}
+}
+
 // TestReplayMissingDestinationLive covers the single-message path: after the
 // source queue is deleted, dlq replay must refuse a confirmed run before any
 // publish or ack (a publish into a nonexistent queue is confirmed and

@@ -278,19 +278,27 @@ by `dlq history`.
 **Outcome:** teams encode "what is safe to replay" instead of the classifier hard-coding
 assumptions.
 
-**Exit gate:**
-- `policy.yaml` parsing (`gopkg.in/yaml.v3`): `when: <condition>` + `action:
-  replay|do_not_replay|require_fix` + params (e.g. `max_retries`,
-  `require_idempotency_key`).
-- `dlq policy validate policy.yaml` is CI-friendly (exit code, machine-readable errors).
-- `dlq policy apply policy.yaml --profile production` binds a policy to a profile.
+**Exit gate (done):**
+- `policy.yaml` parsing (`gopkg.in/yaml.v3`): `when: <condition>` (field op value on
+  `error` / `event_type` / `destination` / `retries`) + `action:
+  replay|do_not_replay|require_fix` + params (`max_retries`,
+  `require_idempotency_key`, which gate whether the rule applies at all). Rules are
+  ordered — first match wins.
+- `dlq policy validate policy.yaml` is CI-friendly: reports every breakage with its
+  rule number, exits non-zero, `--output json` for machine-readable verdicts.
+- `dlq policy apply policy.yaml --profile production` validates and binds a policy to
+  a profile (absolute path in `policy_file`).
 - When a policy is loaded, its rule action **overrides** the classifier default for
-  matching messages (policy gate inside the classifier).
+  matching messages (policy gate inside `ClassifyWithPolicy`, honored by `dlq analyze`
+  and `dlq plan`); a per-message `x-duplicate-of` header outranks any policy rule.
 
 **Packages:** `internal/policy` (policy, rules), `internal/command/policy.go`.
 
-**Tests:** rule evaluation against a `message.Message`; broken/malformed policy rejected
-with clear errors; override behavior when policy and classifier disagree.
+**Tests:** rule evaluation against a `message.Message` (text/retries ops, first-match
+order, param gates); broken/malformed policy rejected with clear errors; override
+behavior when policy and classifier disagree; the live recovery loop drives a
+policy-marked DO_NOT_REPLAY message through analyze -> plan -> dry-run -> confirm
+and leaves it in the DLQ.
 
 ---
 
