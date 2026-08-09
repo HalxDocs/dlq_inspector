@@ -52,7 +52,11 @@ or {"valid":false,"errors":[...]}.`,
 			if opts.Output == "json" {
 				return writeJSON(cmd, map[string]any{"valid": true, "rules": len(pol.Rules)})
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "%s: valid (%d rules)\n", path, len(pol.Rules))
+			label := "rules"
+			if len(pol.Rules) == 1 {
+				label = "rule"
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%s: valid (%d %s)\n", path, len(pol.Rules), label)
 			return nil
 		},
 	}
