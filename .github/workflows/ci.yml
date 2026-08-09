@@ -54,14 +54,19 @@ jobs:
       # The end-to-end recovery loop is the v0.1 gate: analyze -> plan -> dry-run
       # -> confirm-recover -> history against real brokers, plus the
       # missing-destination refusal scenarios, the single-message replay
-      # refusal, the policy-driven DO_NOT_REPLAY scenario, and the same loop
-      # over Redis Streams. Run each explicitly and fail the workflow if any
-      # ever skips, so a silent skip can never pass as coverage.
+      # refusal, the policy-driven DO_NOT_REPLAY scenario, the shared
+      # conformance suites, and the same loop over Redis Streams. Run each
+      # explicitly per package and fail the workflow if any ever skips, so a
+      # silent skip can never pass as coverage.
       - name: "Integration: full recovery loop"
         run: |
-          go test -count=1 -v -run 'TestRecoveryLoop(EndToEnd|MissingDestination|Policy|OverRedis)|TestReplayMissingDestinationLive' ./internal/broker/... | tee /tmp/recovery-test.log
-          grep -- '--- PASS: TestRecoveryLoopEndToEnd' /tmp/recovery-test.log
-          grep -- '--- PASS: TestRecoveryLoopMissingDestination' /tmp/recovery-test.log
-          grep -- '--- PASS: TestRecoveryLoopPolicy' /tmp/recovery-test.log
-          grep -- '--- PASS: TestRecoveryLoopOverRedis' /tmp/recovery-test.log
-          grep -- '--- PASS: TestReplayMissingDestinationLive' /tmp/recovery-test.log
+          go test -count=1 -v -run 'TestRecoveryLoop(EndToEnd|MissingDestination|Policy)|TestReplayMissingDestinationLive|TestConformance' ./internal/broker/rabbitmq/ | tee /tmp/recovery-rabbit.log
+          go test -count=1 -v -run 'TestRecoveryLoopOverRedis|TestConformance|TestStatsMissingStream' ./internal/broker/redisstream/ | tee /tmp/recovery-redis.log
+          grep -- '--- PASS: TestRecoveryLoopEndToEnd' /tmp/recovery-rabbit.log
+          grep -- '--- PASS: TestRecoveryLoopMissingDestination' /tmp/recovery-rabbit.log
+          grep -- '--- PASS: TestRecoveryLoopPolicy' /tmp/recovery-rabbit.log
+          grep -- '--- PASS: TestReplayMissingDestinationLive' /tmp/recovery-rabbit.log
+          grep -- '--- PASS: TestConformance' /tmp/recovery-rabbit.log
+          grep -- '--- PASS: TestRecoveryLoopOverRedis' /tmp/recovery-redis.log
+          grep -- '--- PASS: TestConformance' /tmp/recovery-redis.log
+          grep -- '--- PASS: TestStatsMissingStream' /tmp/recovery-redis.log
