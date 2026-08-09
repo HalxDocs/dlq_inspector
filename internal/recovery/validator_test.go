@@ -32,6 +32,8 @@ type valBroker struct {
 	missingQueues map[string]bool
 	// statsErr, when set, is returned by Stats for every queue.
 	statsErr error
+	// statsPending is the pending count Stats reports for existing queues.
+	statsPending int
 	// publishedDests / publishedMsgs record every Publish call in lockstep.
 	publishedDests []string
 	publishedMsgs  []message.Message
@@ -90,7 +92,7 @@ func (b *valBroker) Stats(ctx context.Context, queue string) (broker.QueueStats,
 	if b.missingQueues[queue] {
 		return broker.QueueStats{}, fmt.Errorf("queue %q not found: %w", queue, broker.ErrQueueNotFound)
 	}
-	return broker.QueueStats{}, nil
+	return broker.QueueStats{Pending: b.statsPending}, nil
 }
 
 func plan(t *testing.T, ids []string) *RecoveryPlan {
@@ -157,6 +159,72 @@ func TestValidateFlagsMissingDestination(t *testing.T) {
 	defer b.mu.Unlock()
 	if b.publishes != 0 || b.acks != 0 {
 		t.Fatalf("dry-run performed mutating I/O: publishes=%d acks=%d", b.publishes, b.acks)
+	}
+}
+
+func TestValidateWarnsLargePendingBacklog(t *testing.T) {
+	// A destination whose consumers already hold many unacknowledged messages
+	// is worth surfacing before a confirmed run: if they are stuck, replayed
+	// messages pile up behind them.
+	p := plan(t, []string{"m1"})
+	b := &valBroker{
+		msgs:         map[string][]message.Message{"orders-dlq": {{ID: "m1", Payload: []byte(`{}`)}}},
+		statsPending: 150,
+	}
+	res, err := (PlanValidator{Broker: b}).Validate(context.Background(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.DestinationPending != 150 {
+		t.Errorf("destination_pending = %d, want 150", res.DestinationPending)
+	}
+	if len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "pending") || !strings.Contains(res.Warnings[0], "150") {
+		t.Errorf("warnings = %v, want the pending-backlog warning", res.Warnings)
+	}
+	// The warning must not change the message-level outcome.
+	if res.Validated != 1 || res.ToReplay != 1 {
+		t.Errorf("result = %+v, want the message still validated", res)
+	}
+}
+
+func TestValidateNoPendingWarningBelowThreshold(t *testing.T) {
+	// A small pending count is normal in-flight work, not a backlog.
+	p := plan(t, []string{"m1"})
+	b := &valBroker{
+		msgs:         map[string][]message.Message{"orders-dlq": {{ID: "m1", Payload: []byte(`{}`)}}},
+		statsPending: 10,
+	}
+	res, err := (PlanValidator{Broker: b}).Validate(context.Background(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.DestinationPending != 0 || len(res.Warnings) != 0 {
+		t.Errorf("result = %+v, want no pending warning for a small backlog", res)
+	}
+}
+
+func TestValidatePendingThresholdCustom(t *testing.T) {
+	// The threshold is overridable (dlq recover --pending-threshold), so an
+	// operator can tune when the warning fires.
+	p := plan(t, []string{"m1"})
+	b := &valBroker{
+		msgs:         map[string][]message.Message{"orders-dlq": {{ID: "m1", Payload: []byte(`{}`)}}},
+		statsPending: 2,
+	}
+	res, err := (PlanValidator{Broker: b, PendingThreshold: 2}).Validate(context.Background(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.DestinationPending != 2 {
+		t.Errorf("destination_pending = %d, want 2 (threshold 2, pending 2)", res.DestinationPending)
+	}
+
+	res, err = (PlanValidator{Broker: b, PendingThreshold: 3}).Validate(context.Background(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.DestinationPending != 0 {
+		t.Errorf("destination_pending = %d, want 0 (threshold 3, pending 2)", res.DestinationPending)
 	}
 }
 

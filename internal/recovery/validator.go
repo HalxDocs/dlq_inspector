@@ -12,6 +12,13 @@ import (
 	"github.com/HalxDocs/dlq_inspector/internal/message"
 )
 
+// DefaultPendingThreshold is the destination pending (delivered-but-
+// unacknowledged) count at which the dry-run warns. Replaying into a queue
+// whose consumers already hold a large backlog of unacknowledged work is a
+// signal worth surfacing: if those consumers are stuck, the replayed messages
+// may pile up behind them.
+const DefaultPendingThreshold = 100
+
 // SkipReason explains why one planned message will not be replayed.
 type SkipReason string
 
@@ -49,8 +56,13 @@ type ValidationResult struct {
 	// confirmed run must refuse in this case — publishing into a nonexistent
 	// queue can be silently dropped.
 	DestinationMissing string `json:"destination_missing,omitempty"`
+	// DestinationPending is the destination's pending (delivered-but-
+	// unacknowledged) message count when it crossed the warning threshold
+	// (0 otherwise). Replaying into a queue with a large pending backlog is
+	// worth surfacing before a confirmed run.
+	DestinationPending int `json:"destination_pending,omitempty"`
 	// Warnings lists non-blocking dry-run findings, e.g. the missing
-	// destination above.
+	// destination or a large pending backlog.
 	Warnings []string `json:"warnings,omitempty"`
 }
 
@@ -61,6 +73,9 @@ type PlanValidator struct {
 	Broker broker.Broker
 	// Audit, when set, is used for duplicate evidence lookups.
 	Audit *audit.Store
+	// PendingThreshold is the destination pending count at which the dry-run
+	// warns about a backlog. 0 means DefaultPendingThreshold.
+	PendingThreshold int
 }
 
 // Validate runs every safety check the plan declares. A plan with an empty
@@ -100,7 +115,8 @@ func (v PlanValidator) Validate(ctx context.Context, plan *RecoveryPlan) (*Valid
 		if plan.Destination == "" {
 			return nil, errors.New("validator: plan has no destination to check")
 		}
-		if _, err := v.Broker.Stats(ctx, plan.Destination); err != nil {
+		stats, err := v.Broker.Stats(ctx, plan.Destination)
+		if err != nil {
 			if errors.Is(err, broker.ErrQueueNotFound) {
 				res.DestinationMissing = plan.Destination
 				res.Warnings = append(res.Warnings,
@@ -108,6 +124,10 @@ func (v PlanValidator) Validate(ctx context.Context, plan *RecoveryPlan) (*Valid
 			} else {
 				return nil, fmt.Errorf("validator: check destination %q: %w", plan.Destination, err)
 			}
+		} else if stats.Pending >= v.pendingThreshold() {
+			res.DestinationPending = stats.Pending
+			res.Warnings = append(res.Warnings,
+				fmt.Sprintf("destination queue %q has %d pending (unacknowledged) messages — consumers may be backed up", plan.Destination, stats.Pending))
 		}
 	}
 
@@ -155,6 +175,15 @@ func (v PlanValidator) Validate(ctx context.Context, plan *RecoveryPlan) (*Valid
 
 	res.ToReplay = res.Selected - res.Skipped
 	return res, nil
+}
+
+// pendingThreshold resolves the validator's configured threshold to a
+// concrete count, defaulting when unset.
+func (v PlanValidator) pendingThreshold() int {
+	if v.PendingThreshold > 0 {
+		return v.PendingThreshold
+	}
+	return DefaultPendingThreshold
 }
 
 // validationScanLimit scans as deep as the plan needs, with a floor so a

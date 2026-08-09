@@ -455,6 +455,63 @@ func TestRecoverDryRunSurfacesMissingDestination(t *testing.T) {
 	}
 }
 
+func TestRecoverDryRunSurfacesPendingBacklog(t *testing.T) {
+	cfgPath, _ := replayTestConfig(t)
+	planPath := filepath.Join(t.TempDir(), "recovery.json")
+	p := recovery.RecoveryPlan{
+		ID: "plan_test", Queue: "orders-dlq", MessageIDs: []string{"m1"},
+		Destination: "orders", Action: "replay",
+		Limits:       recovery.DefaultLimits(),
+		SafetyChecks: []string{recovery.CheckSchema, recovery.CheckDuplicate, recovery.CheckDestination},
+	}
+	if err := writePlanFile(planPath, &p); err != nil {
+		t.Fatal(err)
+	}
+	// The destination exists but its consumers already hold 2 unacknowledged
+	// messages; a low threshold surfaces the backlog warning.
+	fb := &fakeBroker{
+		queues:       []broker.QueueSummary{{Name: "orders"}},
+		statsPending: 2,
+		msgs: map[string][]message.Message{
+			"orders-dlq": {{ID: "m1", Queue: "orders-dlq", Destination: "orders", Payload: []byte(`{}`)}},
+		},
+	}
+	withFakeBroker(t, fb)
+
+	out, err := runCommand(t, "recover", "--plan", planPath, "--pending-threshold", "2", "--config", cfgPath)
+	if err != nil {
+		t.Fatalf("recover: %v\n%s", err, out)
+	}
+	for _, want := range []string{
+		"Pending warning:", "orders", "2 pending", "consumers may be backed up",
+		"Payload validation:", "1/1 passed",
+		"Messages to replay:", "1",
+		"Changes made: NONE",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("recover output missing %q:\n%s", want, out)
+		}
+	}
+
+	fb.mu.Lock()
+	published := len(fb.published)
+	acked := len(fb.acked)
+	fb.mu.Unlock()
+	if published != 0 || acked != 0 {
+		t.Fatalf("dry-run performed mutating I/O: published=%d acked=%d", published, acked)
+	}
+
+	// Without the threshold flag (default 100), the same 2 pending messages
+	// are ordinary in-flight work and produce no warning.
+	out, err = runCommand(t, "recover", "--plan", planPath, "--config", cfgPath)
+	if err != nil {
+		t.Fatalf("recover (default threshold): %v\n%s", err, out)
+	}
+	if strings.Contains(out, "Pending warning") {
+		t.Errorf("default threshold warned for a small backlog:\n%s", out)
+	}
+}
+
 func TestRecoverConfirmRefusesMissingDestination(t *testing.T) {
 	cfgPath, auditPath := replayTestConfig(t)
 	planPath := filepath.Join(t.TempDir(), "recovery.json")

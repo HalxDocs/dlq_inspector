@@ -65,6 +65,9 @@ type ExecutorOptions struct {
 	RetryPerMessage int
 	// FailureThreshold overrides the circuit-breaker threshold (0.0-1.0).
 	FailureThreshold float64
+	// PendingThreshold overrides the destination pending-backlog warning
+	// threshold used by the run's re-validation (0 = default).
+	PendingThreshold int
 	// BrokerName and Profile are recorded on audit entries.
 	BrokerName string
 	Profile    string
@@ -136,7 +139,7 @@ func (e Executor) Execute(ctx context.Context, plan *RecoveryPlan, opts Executor
 
 	// Re-validate now: the queue may have changed since the plan or a
 	// previous dry-run. Messages that fail validation are skipped and audited.
-	vres, err := (PlanValidator{Broker: e.Broker, Audit: e.Audit}).Validate(ctx, plan)
+	vres, err := (PlanValidator{Broker: e.Broker, Audit: e.Audit, PendingThreshold: opts.PendingThreshold}).Validate(ctx, plan)
 	if err != nil {
 		return nil, err
 	}

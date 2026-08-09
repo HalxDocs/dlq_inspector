@@ -22,6 +22,7 @@ func newRecoverCmd(opts *GlobalOptions) *cobra.Command {
 		concurrency      int
 		retry            int
 		failureThreshold float64
+		pendingThreshold int
 		reason           string
 	)
 
@@ -63,13 +64,13 @@ continue. Every message outcome is written to the audit trail.`,
 
 			if confirm {
 				res, err := (recovery.Executor{Broker: b, Audit: store}).Execute(ctx, p, recovery.ExecutorOptions{
-					Confirm:          true,
-					Resume:           resume,
-					BatchSize:        batchSize,
-					Concurrency:      concurrency,
-					RateLimit:        rateLimit,
-					RetryPerMessage:  retry,
+					Confirm:     true,
+					Resume:      resume,
+					BatchSize:   batchSize,
+					Concurrency: concurrency,
+					RateLimit:   rateLimit, RetryPerMessage: retry,
 					FailureThreshold: failureThreshold,
+					PendingThreshold: pendingThreshold,
 					BrokerName:       profile.Broker,
 					Profile:          effectiveProfileName(opts),
 					Reason:           reason,
@@ -83,7 +84,7 @@ continue. Every message outcome is written to the audit trail.`,
 				return renderRecoverSummary(cmd, planPath, p, res)
 			}
 
-			res, err := (recovery.PlanValidator{Broker: b, Audit: store}).Validate(ctx, p)
+			res, err := (recovery.PlanValidator{Broker: b, Audit: store, PendingThreshold: pendingThreshold}).Validate(ctx, p)
 			if err != nil {
 				return err
 			}
@@ -117,6 +118,7 @@ continue. Every message outcome is written to the audit trail.`,
 	cmd.Flags().IntVar(&concurrency, "concurrency", 0, "parallel workers (defaults to the plan's limit)")
 	cmd.Flags().IntVar(&retry, "retry", 1, "extra publish attempts per message before it counts as failed")
 	cmd.Flags().Float64Var(&failureThreshold, "failure-threshold", 0, "circuit-breaker failure rate 0.0-1.0 (default 0.20)")
+	cmd.Flags().IntVar(&pendingThreshold, "pending-threshold", 0, "warn when the destination has at least this many pending (unacknowledged) messages (default 100)")
 	cmd.Flags().StringVar(&reason, "reason", "", "operator-provided reason, recorded in the audit trail")
 	_ = cmd.MarkFlagRequired("plan")
 	return cmd
@@ -132,6 +134,9 @@ func renderRecoverReport(cmd *cobra.Command, planPath string, p *recovery.Recove
 	fmt.Fprintf(tw, "Destination:\t%s\n", p.Destination)
 	if res.DestinationMissing != "" {
 		fmt.Fprintf(tw, "Destination warning:\tqueue %q does not exist — a confirmed run will be refused\n", res.DestinationMissing)
+	}
+	if res.DestinationPending > 0 {
+		fmt.Fprintf(tw, "Pending warning:\tqueue %q has %d pending (unacknowledged) messages — consumers may be backed up\n", p.Destination, res.DestinationPending)
 	}
 	fmt.Fprintf(tw, "Payload validation:\t%d/%d passed\n", res.Validated, res.Selected)
 	if res.Duplicates > 0 {
