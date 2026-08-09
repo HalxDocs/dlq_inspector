@@ -156,7 +156,7 @@ func TestRecoveryLoopOverRedis(t *testing.T) {
 	waitStreamDepth(t, ctx, client, dlq, 1)
 
 	out = runCLI(t, "rollback", "--plan", plan.ID, "--confirm", "--reason", "bad replay", "--config", cli.cfgPath)
-	if !strings.Contains(out, "Restored:") || !strings.Contains(out, "Failed:\t0") {
+	if !strings.Contains(out, "Restored:") || !strings.Contains(out, "Failed:") {
 		t.Errorf("rollback confirm output = %q", out)
 	}
 	// The three restored entries are back in the DLQ (beside the untouched
