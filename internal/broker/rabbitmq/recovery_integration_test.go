@@ -96,8 +96,11 @@ func TestRecoveryLoopEndToEnd(t *testing.T) {
 	}
 
 	// Drive them to the DLQ: consume without auto-ack and nack with
-	// requeue=false, which is what dead-letters a message.
-	deliveries, err := ch.Consume(source, "", false, false, false, false, nil)
+	// requeue=false, which is what dead-letters a message. The consumer is
+	// cancelled immediately afterwards so it cannot swallow the replayed
+	// messages later (a live consumer receives them and holds them unacked,
+	// which would make the source queue look empty).
+	deliveries, err := ch.Consume(source, "fixture-consumer", false, false, false, false, nil)
 	if err != nil {
 		t.Fatalf("consume: %v", err)
 	}
@@ -110,6 +113,9 @@ func TestRecoveryLoopEndToEnd(t *testing.T) {
 		case <-time.After(15 * time.Second):
 			t.Fatalf("timed out waiting for delivery %d", i+1)
 		}
+	}
+	if err := ch.Cancel("fixture-consumer", false); err != nil {
+		t.Fatalf("cancel consumer: %v", err)
 	}
 	waitQueueDepth(t, ch, dlq, 3)
 
@@ -176,11 +182,13 @@ func TestRecoveryLoopEndToEnd(t *testing.T) {
 	waitQueueDepth(t, ch, dlq, 3)
 
 	// ---- Confirm: replays all three to the source queue and acks the DLQ. ----
-	out = runCLI(t, "recover", "--plan", planPath, "--confirm", "--batch-size", "2", "--rate-limit", "0", "--config", cfgPath)
-	for _, want := range []string{"Replayed:", "3", "Failed during replay:", "0", "New DLQ entries:", "0"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("confirm output missing %q:\n%s", want, out)
-		}
+	out = runCLI(t, "recover", "--plan", planPath, "--confirm", "--batch-size", "2", "--rate-limit", "0", "--output", "json", "--config", cfgPath)
+	var execRes recovery.ExecutionResult
+	if err := json.Unmarshal([]byte(out), &execRes); err != nil {
+		t.Fatalf("confirm output is not JSON: %v\n%s", err, out)
+	}
+	if execRes.Replayed != 3 || execRes.Failed != 0 || execRes.NewDLQEntries != 0 || execRes.Skipped != 0 || execRes.Tripped {
+		t.Errorf("execution result = %+v, want 3 replayed, 0 failed", execRes)
 	}
 
 	// DLQ drained, source queue holds the three replayed messages.
