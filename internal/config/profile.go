@@ -14,6 +14,7 @@ type Profile struct {
 	URL              string `yaml:"url,omitempty"`
 	URLEnv           string `yaml:"url_env,omitempty"`
 	DefaultQueue     string `yaml:"default_queue,omitempty"`
+	ManagementURL    string `yaml:"management_url,omitempty"`
 	RequireConfirm   bool   `yaml:"require_confirm,omitempty"`
 	RequireCoConfirm bool   `yaml:"require_co_confirm,omitempty"`
 	PolicyFile       string `yaml:"policy_file,omitempty"`

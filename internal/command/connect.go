@@ -7,14 +7,14 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/HalxDocs/dlq_inspector/internal/broker"
-	_ "github.com/HalxDocs/dlq_inspector/internal/broker/rabbitmq" // register the rabbitmq adapter
 	"github.com/HalxDocs/dlq_inspector/internal/config"
 )
 
 type connectOptions struct {
-	url          string
-	urlEnv       string
-	defaultQueue string
+	url           string
+	urlEnv        string
+	defaultQueue  string
+	managementURL string
 }
 
 func newConnectCmd(opts *GlobalOptions) *cobra.Command {
@@ -48,10 +48,11 @@ Prefer --url-env (the name of an environment variable holding the URL) over
 			}
 
 			profile := &config.Profile{
-				Broker:       brokerName,
-				URL:          co.url,
-				URLEnv:       co.urlEnv,
-				DefaultQueue: co.defaultQueue,
+				Broker:        brokerName,
+				URL:           co.url,
+				URLEnv:        co.urlEnv,
+				DefaultQueue:  co.defaultQueue,
+				ManagementURL: co.managementURL,
 			}
 
 			name := opts.Profile
@@ -89,6 +90,7 @@ Prefer --url-env (the name of an environment variable holding the URL) over
 	cmd.Flags().StringVar(&co.url, "url", "", "connection URL (amqp:// or amqps://)")
 	cmd.Flags().StringVar(&co.urlEnv, "url-env", "", "environment variable holding the connection URL (preferred; keeps secrets out of the config file)")
 	cmd.Flags().StringVar(&co.defaultQueue, "default-queue", "", "default queue to operate on")
+	cmd.Flags().StringVar(&co.managementURL, "management-url", "", "management API base URL (defaults to the AMQP host on port 15672)")
 
 	return cmd
 }

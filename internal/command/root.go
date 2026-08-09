@@ -56,6 +56,8 @@ Workflow: Inspect -> Analyze -> Classify -> Plan -> Validate -> Dry-run -> Recov
 		newVersionCmd(version, commit, date),
 		newConnectCmd(opts),
 		newProfilesCmd(opts),
+		newQueuesCmd(opts),
+		newStatsCmd(opts),
 	)
 
 	return root
