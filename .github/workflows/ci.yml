@@ -18,8 +18,11 @@ jobs:
 
     env:
       # Dual-mode test hooks: unit and safety tests never need these, and the
-      # conformance suite skips when they are absent, but CI provides a real
-      # broker so the full integration surface runs on every push.
+      # integration suites skip when they are absent, but CI provides a real
+      # broker so the full integration surface runs on every push: the
+      # adapter conformance suite, the publish/ack write path, and the
+      # end-to-end recovery loop (analyze -> plan -> dry-run -> confirm ->
+      # history) in internal/broker/rabbitmq/recovery_integration_test.go.
       DLQ_TEST_AMQP_URL: amqp://guest:guest@localhost:5672/
       DLQ_TEST_MANAGEMENT_URL: http://guest:guest@localhost:15672/
 
