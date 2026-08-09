@@ -22,12 +22,13 @@ type Action string
 
 // Supported actions.
 const (
-	ActionInspect Action = "inspect"
-	ActionPatch   Action = "patch"
-	ActionReplay  Action = "replay"
-	ActionAnalyze Action = "analyze"
-	ActionPlan    Action = "plan"
-	ActionRecover Action = "recover"
+	ActionInspect  Action = "inspect"
+	ActionPatch    Action = "patch"
+	ActionReplay   Action = "replay"
+	ActionAnalyze  Action = "analyze"
+	ActionPlan     Action = "plan"
+	ActionRecover  Action = "recover"
+	ActionRollback Action = "rollback"
 )
 
 // Entry is one immutable audit record. Result carries the outcome
@@ -49,6 +50,20 @@ type Entry struct {
 	// PayloadDiff is the old->new payload diff for patched replays, so the
 	// trail shows exactly what was changed. Empty for unpatched operations.
 	PayloadDiff string `json:"payload_diff,omitempty"`
+}
+
+// Snapshot is a point-in-time copy of a message taken just before a confirmed
+// recovery replayed it, so a bad recovery can be reversed: rollback
+// republishes the snapshot to the DLQ it came from.
+type Snapshot struct {
+	PlanID      string            `json:"plan_id"`
+	MessageID   string            `json:"message_id"`
+	SourceQueue string            `json:"source_queue"`
+	Destination string            `json:"destination"`
+	Payload     []byte            `json:"payload,omitempty"`
+	ContentType string            `json:"content_type,omitempty"`
+	Headers     map[string]string `json:"headers,omitempty"`
+	Timestamp   time.Time         `json:"timestamp"`
 }
 
 // Store is an append-only audit log backed by SQLite.
@@ -100,6 +115,19 @@ CREATE TABLE IF NOT EXISTS audit (
     payload_diff  TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_audit_message ON audit(message_id, action);
+
+CREATE TABLE IF NOT EXISTS snapshots (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id      TEXT NOT NULL DEFAULT '',
+    message_id   TEXT NOT NULL DEFAULT '',
+    source_queue TEXT NOT NULL DEFAULT '',
+    destination  TEXT NOT NULL DEFAULT '',
+    payload      BLOB NOT NULL,
+    content_type TEXT NOT NULL DEFAULT '',
+    headers      TEXT NOT NULL DEFAULT '',
+    timestamp    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_snapshots_plan ON snapshots(plan_id);
 `
 
 // migrate adds columns introduced after the initial schema, so stores created
@@ -140,6 +168,74 @@ func tableColumns(db *sql.DB, table string) (map[string]bool, error) {
 		cols[name] = true
 	}
 	return cols, rows.Err()
+}
+
+// SaveSnapshot records one message snapshot, append-only like the audit log.
+// Snapshots are what make a bad recovery reversible: rollback republishes
+// them to the DLQ they came from.
+func (s *Store) SaveSnapshot(sn Snapshot) error {
+	if sn.Timestamp.IsZero() {
+		sn.Timestamp = time.Now().UTC()
+	}
+	hdr, err := json.Marshal(sn.Headers)
+	if err != nil {
+		return fmt.Errorf("audit: marshal snapshot headers: %w", err)
+	}
+	_, err = s.db.Exec(
+		`INSERT INTO snapshots (plan_id, message_id, source_queue, destination, payload, content_type, headers, timestamp)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		sn.PlanID,
+		sn.MessageID,
+		sn.SourceQueue,
+		sn.Destination,
+		sn.Payload,
+		sn.ContentType,
+		string(hdr),
+		sn.Timestamp.Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return fmt.Errorf("audit: save snapshot: %w", err)
+	}
+	return nil
+}
+
+// Snapshots returns every snapshot recorded for one recovery plan, in the
+// order they were replayed — the exact set rollback would restore.
+func (s *Store) Snapshots(planID string) ([]Snapshot, error) {
+	rows, err := s.db.Query(`SELECT plan_id, message_id, source_queue, destination, payload, content_type, headers, timestamp
+	          FROM snapshots WHERE plan_id = ? ORDER BY id ASC`, planID)
+	if err != nil {
+		return nil, fmt.Errorf("audit: query snapshots: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Snapshot
+	for rows.Next() {
+		var (
+			sn          Snapshot
+			hdr, ts     string
+			payload     []byte
+			contentType string
+		)
+		if err := rows.Scan(&sn.PlanID, &sn.MessageID, &sn.SourceQueue, &sn.Destination,
+			&payload, &contentType, &hdr, &ts); err != nil {
+			return nil, fmt.Errorf("audit: scan snapshot: %w", err)
+		}
+		sn.Payload = payload
+		sn.ContentType = contentType
+		if hdr != "" {
+			if err := json.Unmarshal([]byte(hdr), &sn.Headers); err != nil {
+				return nil, fmt.Errorf("audit: parse snapshot headers: %w", err)
+			}
+		}
+		t, err := time.Parse(time.RFC3339Nano, ts)
+		if err != nil {
+			return nil, fmt.Errorf("audit: parse snapshot timestamp %q: %w", ts, err)
+		}
+		sn.Timestamp = t
+		out = append(out, sn)
+	}
+	return out, rows.Err()
 }
 
 // Close closes the underlying database.

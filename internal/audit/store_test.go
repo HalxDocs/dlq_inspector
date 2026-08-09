@@ -221,6 +221,59 @@ CREATE TABLE IF NOT EXISTS audit (
 );
 `
 
+func TestSnapshotRoundTrip(t *testing.T) {
+	s := openTestStore(t)
+
+	sn := Snapshot{
+		PlanID:      "plan_a",
+		MessageID:   "m1",
+		SourceQueue: "orders-dlq",
+		Destination: "orders",
+		Payload:     []byte(`{"order_id":1,"customer_id":1001}`),
+		ContentType: "application/json",
+		Headers:     map[string]string{"x-event-type": "order.placed", "x-message-id": "m1"},
+	}
+	if err := s.SaveSnapshot(sn); err != nil {
+		t.Fatalf("SaveSnapshot: %v", err)
+	}
+	if err := s.SaveSnapshot(Snapshot{PlanID: "plan_a", MessageID: "m2", SourceQueue: "orders-dlq", Destination: "orders", Payload: []byte(`{}`)}); err != nil {
+		t.Fatalf("SaveSnapshot: %v", err)
+	}
+	// A different plan's snapshot must not leak into plan_a's set.
+	if err := s.SaveSnapshot(Snapshot{PlanID: "plan_b", MessageID: "x", SourceQueue: "q", Destination: "d", Payload: []byte(`{}`)}); err != nil {
+		t.Fatalf("SaveSnapshot: %v", err)
+	}
+
+	snaps, err := s.Snapshots("plan_a")
+	if err != nil {
+		t.Fatalf("Snapshots: %v", err)
+	}
+	if len(snaps) != 2 {
+		t.Fatalf("Snapshots len = %d, want 2", len(snaps))
+	}
+	// Replay order preserved.
+	if snaps[0].MessageID != "m1" || snaps[1].MessageID != "m2" {
+		t.Errorf("order = %s, %s; want m1, m2", snaps[0].MessageID, snaps[1].MessageID)
+	}
+	have := snaps[0]
+	if have.PlanID != "plan_a" || have.SourceQueue != "orders-dlq" || have.Destination != "orders" {
+		t.Errorf("snapshot = %+v", have)
+	}
+	if string(have.Payload) != `{"order_id":1,"customer_id":1001}` || have.ContentType != "application/json" {
+		t.Errorf("payload/content_type = %q / %q", have.Payload, have.ContentType)
+	}
+	if have.Headers["x-event-type"] != "order.placed" || have.Headers["x-message-id"] != "m1" {
+		t.Errorf("headers = %+v", have.Headers)
+	}
+	if have.Timestamp.IsZero() {
+		t.Error("timestamp not set")
+	}
+
+	if other, err := s.Snapshots("plan_nope"); err != nil || len(other) != 0 {
+		t.Errorf("Snapshots(unknown) = %+v, %v; want empty", other, err)
+	}
+}
+
 func TestMigrateAddsPayloadDiff(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "audit.db")
 	db, err := sql.Open("sqlite", path)
