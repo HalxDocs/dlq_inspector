@@ -40,10 +40,10 @@ Workflow: Inspect -> Analyze -> Classify -> Plan -> Validate -> Dry-run -> Recov
 		SilenceUsage: true,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			switch opts.Output {
-			case "text", "json":
+			case "text", "json", "jsonl":
 				return nil
 			default:
-				return fmt.Errorf("invalid --output %q (want text or json)", opts.Output)
+				return fmt.Errorf("invalid --output %q (want text, json, or jsonl)", opts.Output)
 			}
 		},
 	}
@@ -60,6 +60,8 @@ Workflow: Inspect -> Analyze -> Classify -> Plan -> Validate -> Dry-run -> Recov
 		newStatsCmd(opts),
 		newInspectCmd(opts),
 		newSearchCmd(opts),
+		newReplayCmd(opts),
+		newHistoryCmd(opts),
 	)
 
 	return root
