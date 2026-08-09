@@ -28,13 +28,15 @@ func TestPublishAckRoundTrip(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
-	defer a.Close()
 
 	name := fmt.Sprintf("dlq-inspector-write-%d", time.Now().UnixNano())
 	if _, err := a.conn.ch.QueueDeclare(name, true, false, false, false, nil); err != nil {
 		t.Fatalf("declare queue: %v", err)
 	}
-	t.Cleanup(func() { a.conn.ch.QueueDelete(name, false, false, false) })
+	// Close is registered first so the queue delete (last-added, first-run)
+	// happens while the channel is still open.
+	t.Cleanup(func() { _ = a.Close() })
+	t.Cleanup(func() { _, _ = a.conn.ch.QueueDelete(name, false, false, false) })
 
 	msg := &message.Message{
 		ID:             "write-test-1",
@@ -90,13 +92,13 @@ func TestAckNotFoundRequeries(t *testing.T) {
 	if err := a.Connect(ctx, broker.ConnectionConfig{URL: url}); err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
-	defer a.Close()
 
 	name := fmt.Sprintf("dlq-inspector-ackmiss-%d", time.Now().UnixNano())
 	if _, err := a.conn.ch.QueueDeclare(name, true, false, false, false, nil); err != nil {
 		t.Fatalf("declare queue: %v", err)
 	}
-	t.Cleanup(func() { a.conn.ch.QueueDelete(name, false, false, false) })
+	t.Cleanup(func() { _ = a.Close() })
+	t.Cleanup(func() { _, _ = a.conn.ch.QueueDelete(name, false, false, false) })
 
 	if err := a.Publish(ctx, name, &message.Message{ID: "keep", Payload: []byte("stay")}); err != nil {
 		t.Fatalf("Publish: %v", err)

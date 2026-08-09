@@ -40,9 +40,10 @@ func TestStatsOnExistingQueue(t *testing.T) {
 		t.Fatalf("declare queue: %v", err)
 	}
 
-	// LIFO cleanup: delete the queue before closing the connection.
-	t.Cleanup(func() { a.conn.ch.QueueDelete(name, false, false, false) })
+	// Cleanup runs last-added first, so Close is registered first: the queue
+	// is deleted while the channel is still open, then the connection closes.
 	t.Cleanup(func() { _ = a.Close() })
+	t.Cleanup(func() { _, _ = a.conn.ch.QueueDelete(name, false, false, false) })
 
 	stats, err := a.Stats(ctx, name)
 	if err != nil {
