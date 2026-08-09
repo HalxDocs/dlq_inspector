@@ -50,7 +50,7 @@ jobs:
       # -> confirm-recover -> history against a real broker. Run it explicitly
       # and fail the workflow if it ever skips, so a silent skip can never pass
       # as coverage.
-      - name: Integration: full recovery loop
+      - name: "Integration: full recovery loop"
         run: |
           go test -count=1 -v -run TestRecoveryLoopEndToEnd ./internal/broker/rabbitmq/ | tee /tmp/recovery-test.log
           grep -- '--- PASS: TestRecoveryLoopEndToEnd' /tmp/recovery-test.log
