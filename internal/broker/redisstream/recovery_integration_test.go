@@ -466,6 +466,91 @@ func TestStatsPendingCounts(t *testing.T) {
 	}
 }
 
+// TestQueuesShowsPending proves the list view carries the same pending
+// signal as Stats: a stream with entries stuck in a consumer group's PEL
+// must show its count in the adapter's ListQueues and in dlq queues output.
+func TestQueuesShowsPending(t *testing.T) {
+	url := os.Getenv("DLQ_TEST_REDIS_URL")
+	if url == "" {
+		t.Skip("DLQ_TEST_REDIS_URL not set")
+	}
+	ctx := context.Background()
+	client := dialRedis(t, ctx, url)
+	defer client.Close()
+
+	name := fmt.Sprintf("orders-pending-%d", time.Now().UnixNano())
+	t.Cleanup(func() { _ = client.Del(ctx, name).Err() })
+
+	for i := 1; i <= 3; i++ {
+		if err := client.XAdd(ctx, &redis.XAddArgs{Stream: name, Values: map[string]any{
+			"payload": fmt.Sprintf(`{"order_id":%d}`, i),
+		}}).Err(); err != nil {
+			t.Fatalf("seed %d: %v", i, err)
+		}
+	}
+	if err := client.XGroupCreate(ctx, name, "workers", "0").Err(); err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	read, err := client.XReadGroup(ctx, &redis.XReadGroupArgs{
+		Group: "workers", Consumer: "worker-1", Streams: []string{name, ">"}, Count: 2,
+	}).Result()
+	if err != nil {
+		t.Fatalf("read group: %v", err)
+	}
+	if len(read) != 1 || len(read[0].Messages) != 2 {
+		t.Fatalf("read %d messages, want 2 pending", len(read[0].Messages))
+	}
+
+	// The adapter's ListQueues reports the stream with its PEL pending count.
+	a := &redisstream.Adapter{}
+	if err := a.Connect(ctx, broker.ConnectionConfig{URL: url}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer a.Close()
+	queues, err := a.ListQueues(ctx)
+	if err != nil {
+		t.Fatalf("ListQueues: %v", err)
+	}
+	var found *broker.QueueSummary
+	for i := range queues {
+		if queues[i].Name == name {
+			found = &queues[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("stream %s not listed; queues = %+v", name, queues)
+	}
+	if found.Messages != 3 || found.Consumers != 1 || found.Pending != 2 {
+		t.Errorf("summary = %+v, want 3 messages, 1 consumer, 2 pending", found)
+	}
+
+	// And dlq queues renders it for an operator.
+	cli := newRedisCLI(t, url, name)
+	out, err := cli.runErr("queues", "--config", cli.cfgPath)
+	if err != nil {
+		t.Fatalf("dlq queues: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "PENDING") {
+		t.Errorf("dlq queues output missing the PENDING header:\n%s", out)
+	}
+	rowFound := false
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.HasPrefix(line, name) {
+			continue
+		}
+		rowFound = true
+		fields := strings.Fields(line)
+		// NAME DURABLE AUTO-DELETE MESSAGES CONSUMERS PENDING
+		if len(fields) != 6 || fields[5] != "2" {
+			t.Errorf("row = %q, want PENDING 2", line)
+		}
+	}
+	if !rowFound {
+		t.Errorf("stream %s missing from dlq queues:\n%s", name, out)
+	}
+}
+
 // dialRedis opens a go-redis client against the test instance.
 func dialRedis(t *testing.T, ctx context.Context, url string) *redis.Client {
 	t.Helper()
