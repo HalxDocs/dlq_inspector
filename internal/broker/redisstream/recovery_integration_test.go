@@ -551,6 +551,93 @@ func TestQueuesShowsPending(t *testing.T) {
 	}
 }
 
+// TestRecoveryPendingBacklogWarning proves the pending-backlog warning end to
+// end: a destination stream whose consumer group holds unacknowledged work
+// must produce a Pending warning in the recover dry-run when the backlog
+// crosses the threshold — and stay silent below it.
+func TestRecoveryPendingBacklogWarning(t *testing.T) {
+	url := os.Getenv("DLQ_TEST_REDIS_URL")
+	if url == "" {
+		t.Skip("DLQ_TEST_REDIS_URL not set")
+	}
+	ctx := context.Background()
+	client := dialRedis(t, ctx, url)
+	defer client.Close()
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	source := "orders-" + suffix
+	dlq := source + "-dlq"
+	t.Cleanup(func() {
+		_ = client.Del(ctx, source).Err()
+		_ = client.Del(ctx, dlq).Err()
+	})
+
+	// The destination stream exists with two entries a consumer group has
+	// read but not acknowledged: 2 pending (in-flight) work.
+	for i := 1; i <= 2; i++ {
+		if err := client.XAdd(ctx, &redis.XAddArgs{Stream: source, Values: map[string]any{
+			"payload": fmt.Sprintf(`{"order_id":%d}`, i),
+		}}).Err(); err != nil {
+			t.Fatalf("seed source %d: %v", i, err)
+		}
+	}
+	if err := client.XGroupCreate(ctx, source, "workers", "0").Err(); err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	if _, err := client.XReadGroup(ctx, &redis.XReadGroupArgs{
+		Group: "workers", Consumer: "worker-1", Streams: []string{source, ">"}, Count: 2,
+	}).Result(); err != nil {
+		t.Fatalf("read group: %v", err)
+	}
+
+	// Three failing DLQ entries whose replay destination is that stream.
+	for i := 1; i <= 3; i++ {
+		if err := client.XAdd(ctx, &redis.XAddArgs{Stream: dlq, Values: map[string]any{
+			"payload":      fmt.Sprintf(`{"order_id":%d,"customer_id":%d}`, 10+i, 1000+i),
+			"destination":  source,
+			"error":        "rejected",
+			"retries":      "1",
+			"content_type": "application/json",
+		}}).Err(); err != nil {
+			t.Fatalf("seed dlq %d: %v", i, err)
+		}
+	}
+
+	cli := newRedisCLI(t, url, dlq)
+	runCLI := func(t *testing.T, args ...string) string { return cli.run(t, args...) }
+
+	planPath := filepath.Join(t.TempDir(), "recovery.json")
+	out := runCLI(t, "plan", "--config", cli.cfgPath, "--output-file", planPath)
+	if !strings.Contains(out, "3 messages selected") {
+		t.Fatalf("plan output = %q", out)
+	}
+
+	// Default threshold (100): 2 pending is ordinary in-flight work — no
+	// warning.
+	out = runCLI(t, "recover", "--plan", planPath, "--config", cli.cfgPath)
+	if strings.Contains(out, "Pending warning") {
+		t.Errorf("default threshold warned for a 2-message backlog:\n%s", out)
+	}
+	for _, want := range []string{"3/3 passed", "Messages to replay:", "3", "Changes made: NONE"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("dry-run output missing %q:\n%s", want, out)
+		}
+	}
+
+	// With the threshold lowered to 2, the backlog is surfaced as a warning
+	// naming the destination and the pending count.
+	out = runCLI(t, "recover", "--plan", planPath, "--pending-threshold", "2", "--config", cli.cfgPath)
+	for _, want := range []string{"Pending warning:", source, "2 pending", "consumers may be backed up"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("dry-run output missing %q:\n%s", want, out)
+		}
+	}
+	// The warning is advisory: validation still completes and changes nothing.
+	if !strings.Contains(out, "Changes made: NONE") {
+		t.Errorf("dry-run with the warning must still change nothing:\n%s", out)
+	}
+}
+
 // dialRedis opens a go-redis client against the test instance.
 func dialRedis(t *testing.T, ctx context.Context, url string) *redis.Client {
 	t.Helper()
