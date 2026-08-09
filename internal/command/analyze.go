@@ -48,6 +48,11 @@ no message is published, acked, or moved.`,
 				return err
 			}
 
+			pol, err := loadPolicyForProfile(effectiveProfileName(opts), profile)
+			if err != nil {
+				return err
+			}
+
 			msgs, err := b.Search(ctx, queue, broker.SearchFilter{Limit: limit})
 			if err != nil {
 				return err
@@ -57,7 +62,7 @@ no message is published, acked, or moved.`,
 				return nil
 			}
 
-			groups := (recovery.Analyzer{}).Analyze(msgs)
+			groups := (recovery.Analyzer{Policy: pol}).Analyze(msgs)
 
 			if opts.Output == "json" {
 				return writeJSON(cmd, analyzeResult{

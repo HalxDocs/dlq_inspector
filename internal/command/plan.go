@@ -51,6 +51,11 @@ DO_NOT_REPLAY are excluded unless --include-do-not-replay is given.`,
 				return err
 			}
 
+			pol, err := loadPolicyForProfile(effectiveProfileName(opts), profile)
+			if err != nil {
+				return err
+			}
+
 			msgs, err := b.Search(ctx, queue, broker.SearchFilter{Limit: limit})
 			if err != nil {
 				return err
@@ -65,6 +70,7 @@ DO_NOT_REPLAY are excluded unless --include-do-not-replay is given.`,
 				Destination:        destination,
 				Limits:             recovery.PlanLimits{BatchSize: batchSize, RateLimit: rateLimit, Concurrency: concurrency},
 				IncludeDoNotReplay: includeDoNotReplay,
+				Policy:             pol,
 			})
 			if err != nil {
 				return err
