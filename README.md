@@ -103,6 +103,7 @@ missing or conflict, and teams can encode their own judgment as committed YAML
 
 ## Documentation
 
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — layered design, Broker contract, safety gate
 - [docs/COMMANDS.md](docs/COMMANDS.md) — full command reference
 - [docs/POLICIES.md](docs/POLICIES.md) — recovery policy YAML grammar and CI usage
 - [docs/PLAN.md](docs/PLAN.md) — architecture rationale and the phased build plan
