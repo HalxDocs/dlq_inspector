@@ -145,13 +145,14 @@ func (s *Store) Recent(limit int) ([]Entry, error) {
 }
 
 // Replayed returns confirmed, successful replay entries for a message ID —
-// the duplicate evidence signal: a message that was already replayed once
-// should not be replayed again without thought.
+// the duplicate evidence signal: a message that was already replayed or
+// recovered successfully should not be replayed again without thought. Both
+// single replay and batch recovery actions count.
 func (s *Store) Replayed(messageID string) ([]Entry, error) {
 	return s.query(`SELECT timestamp, action, message_id, plan_id, source_queue, destination,
 	          dry_run, confirmed, result, broker, profile, reason
 	          FROM audit
-	          WHERE message_id = ? AND action = 'replay' AND confirmed = 1 AND result = 'success'
+	          WHERE message_id = ? AND action IN ('replay', 'recover') AND confirmed = 1 AND result = 'success'
 	          ORDER BY id DESC`,
 		messageID)
 }

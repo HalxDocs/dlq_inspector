@@ -12,10 +12,9 @@ import (
 	"github.com/HalxDocs/dlq_inspector/internal/audit"
 	"github.com/HalxDocs/dlq_inspector/internal/broker"
 	"github.com/HalxDocs/dlq_inspector/internal/message"
-)
-
-// valBroker is a minimal in-memory Broker for validator tests. It records
-// every Publish/Ack so tests can prove the dry-run performed no mutating I/O.
+) // valBroker is a minimal in-memory Broker for validator and executor tests.
+// It records every Publish/Ack so tests can prove a dry-run performed no
+// mutating I/O, and injects failures per message ID.
 type valBroker struct {
 	mu        sync.Mutex
 	msgs      map[string][]message.Message
@@ -23,6 +22,11 @@ type valBroker struct {
 	publishes int
 	acks      int
 	searchErr error
+	// failPublish maps a message ID to how many consecutive publish attempts
+	// fail before one succeeds.
+	failPublish map[string]int
+	// failAck is the set of message IDs whose Ack always fails.
+	failAck map[string]bool
 }
 
 func (b *valBroker) Connect(ctx context.Context, cfg broker.ConnectionConfig) error { return nil }
@@ -52,12 +56,19 @@ func (b *valBroker) Publish(ctx context.Context, dest string, m *message.Message
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.publishes++
+	if n := b.failPublish[m.ID]; n > 0 {
+		b.failPublish[m.ID] = n - 1
+		return fmt.Errorf("publish failed for %s", m.ID)
+	}
 	return nil
 }
 func (b *valBroker) Ack(ctx context.Context, queue, id string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.acks++
+	if b.failAck[id] {
+		return fmt.Errorf("ack failed for %s", id)
+	}
 	return nil
 }
 func (b *valBroker) Stats(ctx context.Context, queue string) (broker.QueueStats, error) {
