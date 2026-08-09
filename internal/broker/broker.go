@@ -71,9 +71,7 @@ type QueueSummary struct {
 	// DLQ is the associated dead-letter queue, when the queue has a
 	// dead-letter exchange binding.
 	DLQ string
-}
-
-// QueueStats reports queue-level statistics.
+} // QueueStats reports queue-level statistics.
 type QueueStats struct {
 	Queue     string
 	Messages  int
@@ -81,11 +79,24 @@ type QueueStats struct {
 	// Pending is the total number of messages delivered to a consumer but not
 	// yet acknowledged — e.g. the sum of Redis Streams consumer-group PELs.
 	// 0 when the broker does not report it or nothing is pending.
-	Pending   int
+	Pending int
+	// Groups breaks Pending down per consumer group (e.g. Redis Streams
+	// groups with their own PEL counts). Empty when the broker has no
+	// consumer groups or does not report them.
+	Groups    []ConsumerGroupStats
 	OldestAge time.Duration
 	NewestAge time.Duration
 	// RetryCount is the average retry count across the queue's messages.
 	RetryCount int
+}
+
+// ConsumerGroupStats describes one consumer group's state: its name, how many
+// consumers it has, and how many entries it has delivered but not yet
+// acknowledged (its PEL) — the per-group slice of QueueStats.Pending.
+type ConsumerGroupStats struct {
+	Name      string `json:"name"`
+	Consumers int    `json:"consumers"`
+	Pending   int    `json:"pending"`
 }
 
 // SearchFilter narrows a Search call. Zero values mean "no constraint".

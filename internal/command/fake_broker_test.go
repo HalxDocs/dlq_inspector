@@ -37,6 +37,9 @@ type fakeBroker struct {
 	// statsPending is added to every Stats result, so tests can exercise the
 	// pending rendering without a live broker.
 	statsPending int
+	// statsGroups, when set, is returned as the per-group breakdown of every
+	// Stats result.
+	statsGroups []broker.ConsumerGroupStats
 }
 
 // publishCall records one Publish invocation.
@@ -107,7 +110,10 @@ func (f *fakeBroker) Stats(ctx context.Context, queue string) (broker.QueueStats
 	}
 	for _, q := range f.queues {
 		if q.Name == queue {
-			return broker.QueueStats{Queue: q.Name, Messages: q.Messages, Consumers: q.Consumers, Pending: f.statsPending}, nil
+			return broker.QueueStats{
+				Queue: q.Name, Messages: q.Messages, Consumers: q.Consumers,
+				Pending: f.statsPending, Groups: append([]broker.ConsumerGroupStats(nil), f.statsGroups...),
+			}, nil
 		}
 	}
 	return broker.QueueStats{}, fmt.Errorf("queue %q not found: %w", queue, broker.ErrQueueNotFound)

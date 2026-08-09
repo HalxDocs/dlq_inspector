@@ -100,6 +100,47 @@ func TestStatsShowsPending(t *testing.T) {
 	}
 }
 
+func TestStatsShowsPerGroupBreakdown(t *testing.T) {
+	cfgPath := brokerTestConfig(t)
+	fb := &fakeBroker{
+		queues:       []broker.QueueSummary{{Name: "orders-dlq", Messages: 3, Consumers: 2}},
+		statsPending: 5,
+		statsGroups: []broker.ConsumerGroupStats{
+			{Name: "workers", Consumers: 1, Pending: 3},
+			{Name: "retries", Consumers: 1, Pending: 2},
+		},
+	}
+	withFakeBroker(t, fb)
+
+	out, err := runCommand(t, "stats", "orders-dlq", "--config", cfgPath)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	for _, want := range []string{"Pending:", "5", "Consumer groups:", "workers", "consumers: 1", "pending: 3", "retries", "pending: 2"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestStatsOmitsBreakdownWithoutGroups(t *testing.T) {
+	// Brokers without consumer groups (RabbitMQ) render no breakdown section.
+	cfgPath := brokerTestConfig(t)
+	fb := &fakeBroker{
+		queues:       []broker.QueueSummary{{Name: "orders-dlq", Messages: 3, Consumers: 1}},
+		statsPending: 2,
+	}
+	withFakeBroker(t, fb)
+
+	out, err := runCommand(t, "stats", "orders-dlq", "--config", cfgPath)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if strings.Contains(out, "Consumer groups") {
+		t.Errorf("breakdown rendered for a broker without consumer groups:\n%s", out)
+	}
+}
+
 func TestStatsOmitsPendingWhenUnreported(t *testing.T) {
 	// Brokers that do not track pending (e.g. RabbitMQ's AMQP path) must not
 	// render a misleading "Pending: 0" line.

@@ -120,11 +120,19 @@ func (a *Adapter) Stats(ctx context.Context, queue string) (broker.QueueStats, e
 		for _, g := range groups {
 			stats.Consumers += int(g.Consumers)
 			// XPENDING per group: entries delivered to a consumer but not yet
-			// acknowledged — work in flight or stuck in the group's PEL. Summed
-			// across groups this is the total in-flight/unprocessed work.
+			// acknowledged — work in flight or stuck in the group's PEL. The
+			// count is surfaced both in the per-group breakdown and summed as
+			// the queue's total pending.
+			pending := 0
 			if p, err := a.conn.client.XPending(ctx, queue, g.Name).Result(); err == nil {
-				stats.Pending += int(p.Count)
+				pending = int(p.Count)
 			}
+			stats.Pending += pending
+			stats.Groups = append(stats.Groups, broker.ConsumerGroupStats{
+				Name:      g.Name,
+				Consumers: int(g.Consumers),
+				Pending:   pending,
+			})
 		}
 	}
 	return stats, nil

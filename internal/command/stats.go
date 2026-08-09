@@ -51,7 +51,20 @@ default_queue is used.`,
 			// Message age is not exposed by the AMQP protocol in this phase.
 			fmt.Fprintf(tw, "Oldest age:\tn/a\n")
 			fmt.Fprintf(tw, "Newest age:\tn/a\n")
-			return tw.Flush()
+			if err := tw.Flush(); err != nil {
+				return err
+			}
+
+			// Brokers with consumer groups (Redis Streams) break the pending
+			// total down per group so an operator can see which group's PEL is
+			// holding the unacknowledged work.
+			if len(stats.Groups) > 0 {
+				fmt.Fprintln(cmd.OutOrStdout(), "\nConsumer groups:")
+				for _, g := range stats.Groups {
+					fmt.Fprintf(cmd.OutOrStdout(), "  %s\tconsumers: %d\tpending: %d\n", g.Name, g.Consumers, g.Pending)
+				}
+			}
+			return nil
 		},
 	}
 }

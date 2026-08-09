@@ -452,6 +452,12 @@ func TestStatsPendingCounts(t *testing.T) {
 	if stats.Messages != 3 || stats.Consumers != 1 || stats.Pending != 2 {
 		t.Errorf("stats = %+v, want 3 messages, 1 consumer, 2 pending", stats)
 	}
+	// The per-group breakdown names the group and its PEL count, so an
+	// operator can see which group holds the unacknowledged work.
+	if len(stats.Groups) != 1 || stats.Groups[0].Name != "workers" ||
+		stats.Groups[0].Consumers != 1 || stats.Groups[0].Pending != 2 {
+		t.Errorf("stats.Groups = %+v, want [workers: 1 consumer, 2 pending]", stats.Groups)
+	}
 
 	// And dlq stats surfaces it for an operator.
 	cli := newRedisCLI(t, url, name)
@@ -459,7 +465,7 @@ func TestStatsPendingCounts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dlq stats: %v\n%s", err, out)
 	}
-	for _, want := range []string{"Pending:", "2", "Consumers:", "1"} {
+	for _, want := range []string{"Pending:", "2", "Consumers:", "1", "Consumer groups:", "workers", "pending: 2"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("dlq stats output missing %q:\n%s", want, out)
 		}
