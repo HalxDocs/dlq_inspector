@@ -137,6 +137,36 @@ func TestRecoveryLoopEndToEnd(t *testing.T) {
 			t.Errorf("history output missing %q:\n%s", want, out)
 		}
 	}
+
+	// ---- Rollback: every confirmed replay was snapshotted, so a bad replay
+	// can be reversed. The dry run restores nothing; the confirmed rollback
+	// moves the three messages back to the DLQ with the operator's reason. ----
+	out = runCLI(t, "rollback", "--plan", plan.ID, "--config", cli.cfgPath)
+	for _, want := range []string{"Rollback plan:", plan.ID, "Snapshots:", "3", f.dlq, "Messages to restore:", "3", "Changes made: NONE"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("rollback dry-run output missing %q:\n%s", want, out)
+		}
+	}
+	waitQueueDepth(t, ch, f.dlq, 1)
+
+	out = runCLI(t, "rollback", "--plan", plan.ID, "--confirm", "--reason", "bad replay", "--config", cli.cfgPath)
+	if !strings.Contains(out, "Restored:") || !strings.Contains(out, "Failed:\t0") {
+		t.Errorf("rollback confirm output = %q", out)
+	}
+	// The three restored messages are back in the DLQ (beside the untouched
+	// duplicate); the replayed copies stay in the source queue.
+	waitQueueDepth(t, ch, f.dlq, 4)
+	waitQueueDepth(t, ch, f.source, 3)
+
+	// The audit trail now shows the rollback: three restores plus the plan
+	// summary, all tagged with the operator's reason.
+	out = runCLI(t, "history", "--plan", plan.ID, "--config", cli.cfgPath)
+	if got := strings.Count(out, "success"); got != 6 {
+		t.Errorf("history has %d success entries after rollback, want 6:\n%s", got, out)
+	}
+	if !strings.Contains(out, "rollback") || !strings.Contains(out, "bad replay") {
+		t.Errorf("history missing the rollback trail:\n%s", out)
+	}
 }
 
 // TestRecoveryLoopMissingDestination covers the dangerous case where the

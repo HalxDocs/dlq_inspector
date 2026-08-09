@@ -50,8 +50,9 @@ policies-as-code, second broker.
 
 **Explicitly out:** Kafka, SQS, multi-broker fan-out, schema-aware payload validation,
 a web dashboard/hosted service/Kubernetes operator — never in scope. TUI, watch mode,
-notifications, snapshot/rollback, Prometheus metrics, co-confirm are post-1.0
-adoption features (Phase 10).
+notifications, Prometheus metrics, co-confirm are post-1.0 adoption features (Phase 10).
+Snapshot & rollback shipped early (Phase 6 note below) because a recovery tool that
+cannot reverse a bad recovery is incomplete.
 
 ---
 
@@ -235,9 +236,15 @@ the recovery-engine MVP.
   audited as `refused`) when the plan's destination queue does not exist — publishing
   into a nonexistent queue can be confirmed and silently dropped, which would lose the
   DLQ copy. The dry-run surfaces the same finding as a `Destination warning`.
+- **Snapshot & rollback (built):** every confirmed replay is snapshotted (payload,
+  content type, headers, DLQ, destination) in the audit store before the DLQ copy is
+  acked. `dlq rollback --plan <id>` restores them to the DLQ with the operator's reason
+  — dry-run by default, refuses (audited) if the DLQ has vanished, and restores carry
+  the original replay destination (`x-destination` header / destination field) so a
+  future plan can replay them again.
 
-**Packages:** `internal/recovery/executor.go`, `internal/command/recover.go`, `history.go`,
-`internal/audit` (plan queries).
+**Packages:** `internal/recovery/executor.go` (+ `rollback.go`), `internal/command/recover.go`
+(+ `rollback.go`), `history.go`, `internal/audit` (plan queries, snapshots table).
 
 **Tests:** circuit breaker halts a batch when injected failures cross threshold and
 requires re-confirm; rate limiter throttles; executor handles publish-failure without
@@ -343,8 +350,8 @@ interface + pass conformance, no engine changes.
 2. Live watch mode (`dlq watch <queue> --alert-threshold 100`) — DLQ growth tailing
    mid-incident.
 3. Sensitive-field redaction completion (audit-logged `--show-sensitive`).
-4. Snapshot & rollback — snapshot messages before executing a plan; roll back a bad
-   recovery by moving messages back to the DLQ with a reason.
+4. ~~Snapshot & rollback~~ — **done**: the executor snapshots every replayed message and
+   `dlq rollback --plan <id>` moves them back to the DLQ with a reason (see Phase 6).
 5. Notifications — Slack/webhook summaries after analyze and recover.
 6. Two-person confirm — `require_co_confirm` profile flag needs a second operator token.
 7. Replay simulation — dry-run against a shadow/staging destination.
