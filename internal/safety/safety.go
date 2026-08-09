@@ -16,6 +16,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/HalxDocs/dlq_inspector/internal/audit"
@@ -50,6 +51,12 @@ type Request struct {
 // ErrConfirmRequired is returned when Execute is called without an explicit
 // confirm. The safety gate never performs mutating I/O without it.
 var ErrConfirmRequired = errors.New("confirmation required: re-run with --confirm")
+
+// ErrDestinationMissing is returned when the resolved replay destination does
+// not exist on the broker. Publishing into a nonexistent queue can be
+// confirmed and silently dropped, so the replay is refused before anything
+// is published or acked — the DLQ copy is never at risk.
+var ErrDestinationMissing = errors.New("destination queue does not exist — refusing to replay")
 
 // Preview is the full dry-run picture: everything that would happen, with
 // zero mutating I/O performed.
@@ -90,6 +97,20 @@ func DryRun(ctx context.Context, r Request) (*Preview, error) {
 	checks := []string{"message_exists", "destination_resolved", "duplicate_checked"}
 	warnings := duplicateWarnings(dup)
 
+	// Destination existence is part of the dry-run picture: a publish into a
+	// nonexistent queue is confirmed and silently dropped, after which acking
+	// the DLQ copy would lose the message. Surface it here so the operator
+	// sees it before --confirm; Execute refuses outright.
+	if _, err := r.Broker.Stats(ctx, dest); err != nil {
+		if errors.Is(err, broker.ErrQueueNotFound) {
+			warnings = append(warnings, fmt.Sprintf("destination queue %q does not exist — a confirmed replay will be refused", dest))
+		} else {
+			return nil, fmt.Errorf("destination check for %q: %w", dest, err)
+		}
+	} else {
+		checks = append(checks, "destination_exists")
+	}
+
 	if r.Audit != nil {
 		_ = r.Audit.Append(dryRunEntry(r, m, dest))
 	}
@@ -119,6 +140,19 @@ func Execute(ctx context.Context, r Request) (*Result, error) {
 	dest, err := resolveDestination(r.Destination, m)
 	if err != nil {
 		return nil, err
+	}
+
+	// Hard safety invariant: never publish into a destination that does not
+	// exist. RabbitMQ confirms publishes to nonexistent queues and silently
+	// drops them — acking the DLQ copy afterwards would lose the message.
+	// Refuse before any publish or ack; the refusal itself is audited.
+	if _, err := r.Broker.Stats(ctx, dest); err != nil {
+		if errors.Is(err, broker.ErrQueueNotFound) {
+			appendRefusal(r, m, dest, fmt.Sprintf("destination queue %q does not exist", dest))
+			return nil, fmt.Errorf("%w: queue %q (DLQ message left in place)", ErrDestinationMissing, dest)
+		}
+		appendRefusal(r, m, dest, fmt.Sprintf("destination check failed: %v", err))
+		return nil, fmt.Errorf("destination check for %q: %w (DLQ message left in place)", dest, err)
 	}
 
 	// Publish first. If this fails, the DLQ copy is untouched — never acked.
@@ -214,5 +248,31 @@ func appendFailure(r Request, m *message.Message, dest, result string) {
 		Broker:      r.BrokerName,
 		Profile:     r.Profile,
 		Reason:      r.Reason,
+	})
+}
+
+// appendRefusal records a confirmed run that was refused before any publish
+// or ack (e.g. the destination queue does not exist), so the trail explains
+// why nothing happened. The operator's reason is preserved alongside the
+// refusal detail.
+func appendRefusal(r Request, m *message.Message, dest, detail string) {
+	if r.Audit == nil {
+		return
+	}
+	reason := r.Reason
+	if detail != "" {
+		reason = strings.TrimSpace(reason + " — " + detail)
+	}
+	_ = r.Audit.Append(audit.Entry{
+		Timestamp:   time.Now().UTC(),
+		Action:      audit.ActionReplay,
+		MessageID:   m.ID,
+		SourceQueue: r.Queue,
+		Destination: dest,
+		Confirmed:   true,
+		Result:      "refused",
+		Broker:      r.BrokerName,
+		Profile:     r.Profile,
+		Reason:      reason,
 	})
 }

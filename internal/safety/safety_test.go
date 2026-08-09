@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -24,6 +25,10 @@ type recordingBroker struct {
 	publishErr error
 	ackErr     error
 	inspectErr error
+	// missingQueues are queue names Stats reports as not existing.
+	missingQueues map[string]bool
+	// statsErr, when set, is returned by Stats for every queue.
+	statsErr error
 }
 
 func (b *recordingBroker) Connect(ctx context.Context, cfg broker.ConnectionConfig) error { return nil }
@@ -32,6 +37,14 @@ func (b *recordingBroker) ListQueues(ctx context.Context) ([]broker.QueueSummary
 	return nil, nil
 }
 func (b *recordingBroker) Stats(ctx context.Context, queue string) (broker.QueueStats, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.statsErr != nil {
+		return broker.QueueStats{}, b.statsErr
+	}
+	if b.missingQueues[queue] {
+		return broker.QueueStats{}, fmt.Errorf("queue %q not found: %w", queue, broker.ErrQueueNotFound)
+	}
 	return broker.QueueStats{}, nil
 }
 func (b *recordingBroker) Search(ctx context.Context, queue string, f broker.SearchFilter) ([]message.Message, error) {
@@ -128,8 +141,17 @@ func TestPreviewPerformsNoMutatingIO(t *testing.T) {
 	if p.Destination != "orders" {
 		t.Errorf("Destination = %q, want orders", p.Destination)
 	}
-	if len(p.SafetyChecks) != 3 {
+	if len(p.SafetyChecks) != 4 {
 		t.Errorf("SafetyChecks = %v", p.SafetyChecks)
+	}
+	found := false
+	for _, c := range p.SafetyChecks {
+		if c == "destination_exists" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("SafetyChecks = %v, missing destination_exists", p.SafetyChecks)
 	}
 
 	b.mu.Lock()
@@ -276,5 +298,111 @@ func TestExecuteDestinationOverride(t *testing.T) {
 	}
 	if res.Destination != "orders" {
 		t.Errorf("Destination = %q", res.Destination)
+	}
+}
+
+func TestPreviewSurfacesMissingDestination(t *testing.T) {
+	s := openAudit(t)
+	b := &recordingBroker{
+		msgs:          map[string][]message.Message{"orders-dlq": {dlqMessage()}},
+		missingQueues: map[string]bool{"orders": true},
+	}
+	p, err := DryRun(context.Background(), testRequest(b, s))
+	if err != nil {
+		t.Fatalf("DryRun: %v", err)
+	}
+	// The destination check is NOT reported as passed, and a warning names
+	// the missing queue.
+	for _, c := range p.SafetyChecks {
+		if c == "destination_exists" {
+			t.Error("destination_exists reported as a passed check for a missing queue")
+		}
+	}
+	found := false
+	for _, w := range p.Warnings {
+		if strings.Contains(w, "orders") && strings.Contains(w, "refused") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("warnings = %v, want the missing-destination warning", p.Warnings)
+	}
+
+	b.mu.Lock()
+	published := len(b.published)
+	acked := len(b.acked)
+	b.mu.Unlock()
+	if published != 0 || acked != 0 {
+		t.Fatalf("dry-run performed mutating I/O: published=%d acked=%d", published, acked)
+	}
+
+	// The dry-run itself is still audited.
+	entries, err := s.Recent(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Result != "dry_run" {
+		t.Fatalf("audit entries = %+v, want one dry_run", entries)
+	}
+}
+
+func TestExecuteRefusesMissingDestination(t *testing.T) {
+	s := openAudit(t)
+	b := &recordingBroker{
+		msgs:          map[string][]message.Message{"orders-dlq": {dlqMessage()}},
+		missingQueues: map[string]bool{"orders": true},
+	}
+	_, err := Execute(context.Background(), confirmedRequest(b, s))
+	if !errors.Is(err, ErrDestinationMissing) {
+		t.Fatalf("got %v, want ErrDestinationMissing", err)
+	}
+
+	b.mu.Lock()
+	published := len(b.published)
+	acked := len(b.acked)
+	b.mu.Unlock()
+	if published != 0 || acked != 0 {
+		t.Fatalf("refused run performed I/O: published=%d acked=%d", published, acked)
+	}
+
+	// The refusal is audited with the destination named in the reason.
+	entries, err := s.Recent(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Result != "refused" || entries[0].MessageID != "m1" {
+		t.Fatalf("audit entries = %+v, want one refused entry", entries)
+	}
+	if !strings.Contains(entries[0].Reason, "orders") {
+		t.Errorf("refusal reason = %q, want the queue name", entries[0].Reason)
+	}
+}
+
+func TestExecuteRefusesDestinationCheckError(t *testing.T) {
+	// A Stats failure that is not "queue not found" (broker down, permission
+	// denied) also refuses — we cannot verify the destination, so nothing is
+	// published or acked.
+	s := openAudit(t)
+	b := &recordingBroker{
+		msgs:     map[string][]message.Message{"orders-dlq": {dlqMessage()}},
+		statsErr: errors.New("broker down"),
+	}
+	_, err := Execute(context.Background(), confirmedRequest(b, s))
+	if err == nil || !strings.Contains(err.Error(), "destination check") {
+		t.Fatalf("got %v, want a destination-check error", err)
+	}
+	b.mu.Lock()
+	published := len(b.published)
+	acked := len(b.acked)
+	b.mu.Unlock()
+	if published != 0 || acked != 0 {
+		t.Fatalf("refused run performed I/O: published=%d acked=%d", published, acked)
+	}
+	entries, err := s.Recent(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Result != "refused" {
+		t.Fatalf("audit entries = %+v, want one refused entry", entries)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/HalxDocs/dlq_inspector/internal/audit"
+	"github.com/HalxDocs/dlq_inspector/internal/broker"
 	"github.com/HalxDocs/dlq_inspector/internal/config"
 	"github.com/HalxDocs/dlq_inspector/internal/message"
 )
@@ -44,7 +45,10 @@ func replayMsg() message.Message {
 
 func TestReplayDryRunDefault(t *testing.T) {
 	cfgPath, auditPath := replayTestConfig(t)
-	fb := &fakeBroker{msgs: map[string][]message.Message{"orders-dlq": {replayMsg()}}}
+	fb := &fakeBroker{
+		queues: []broker.QueueSummary{{Name: "orders"}},
+		msgs:   map[string][]message.Message{"orders-dlq": {replayMsg()}},
+	}
 	withFakeBroker(t, fb)
 
 	out, err := runCommand(t, "replay", "--id", "m1", "--config", cfgPath)
@@ -81,7 +85,10 @@ func TestReplayDryRunDefault(t *testing.T) {
 
 func TestReplayConfirmExecutesAndAudits(t *testing.T) {
 	cfgPath, auditPath := replayTestConfig(t)
-	fb := &fakeBroker{msgs: map[string][]message.Message{"orders-dlq": {replayMsg()}}}
+	fb := &fakeBroker{
+		queues: []broker.QueueSummary{{Name: "orders"}},
+		msgs:   map[string][]message.Message{"orders-dlq": {replayMsg()}},
+	}
 	withFakeBroker(t, fb)
 
 	out, err := runCommand(t, "replay", "--id", "m1", "--confirm", "--config", cfgPath)
@@ -133,6 +140,7 @@ func TestReplayRequiresID(t *testing.T) {
 func TestReplayPublishFailureNoAck(t *testing.T) {
 	cfgPath, auditPath := replayTestConfig(t)
 	fb := &fakeBroker{
+		queues:     []broker.QueueSummary{{Name: "orders"}},
 		msgs:       map[string][]message.Message{"orders-dlq": {replayMsg()}},
 		publishErr: errBrokerDown,
 	}
@@ -178,7 +186,10 @@ func TestReplayDuplicateWarning(t *testing.T) {
 	}
 	store.Close()
 
-	fb := &fakeBroker{msgs: map[string][]message.Message{"orders-dlq": {replayMsg()}}}
+	fb := &fakeBroker{
+		queues: []broker.QueueSummary{{Name: "orders"}},
+		msgs:   map[string][]message.Message{"orders-dlq": {replayMsg()}},
+	}
 	withFakeBroker(t, fb)
 
 	out, err := runCommand(t, "replay", "--id", "m1", "--config", cfgPath)
@@ -187,6 +198,82 @@ func TestReplayDuplicateWarning(t *testing.T) {
 	}
 	if !strings.Contains(out, "POSSIBLE DUPLICATE") {
 		t.Errorf("duplicate warning missing:\n%s", out)
+	}
+}
+
+func TestReplayDryRunSurfacesMissingDestination(t *testing.T) {
+	cfgPath, auditPath := replayTestConfig(t)
+	// No queues registered: the message's destination does not exist.
+	fb := &fakeBroker{msgs: map[string][]message.Message{"orders-dlq": {replayMsg()}}}
+	withFakeBroker(t, fb)
+
+	out, err := runCommand(t, "replay", "--id", "m1", "--config", cfgPath)
+	if err != nil {
+		t.Fatalf("replay (dry-run): %v\n%s", err, out)
+	}
+	for _, want := range []string{"orders", "does not exist", "refused", "Changes made: NONE"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("dry-run output missing %q:\n%s", want, out)
+		}
+	}
+
+	fb.mu.Lock()
+	published := len(fb.published)
+	acked := len(fb.acked)
+	fb.mu.Unlock()
+	if published != 0 || acked != 0 {
+		t.Fatalf("dry-run performed mutating I/O: published=%d acked=%d", published, acked)
+	}
+
+	store, err := audit.Open(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	entries, err := store.Recent(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Result != "dry_run" {
+		t.Fatalf("audit entries = %+v, want one dry_run", entries)
+	}
+}
+
+func TestReplayConfirmRefusesMissingDestination(t *testing.T) {
+	cfgPath, auditPath := replayTestConfig(t)
+	fb := &fakeBroker{msgs: map[string][]message.Message{"orders-dlq": {replayMsg()}}}
+	withFakeBroker(t, fb)
+
+	out, err := runCommand(t, "replay", "--id", "m1", "--confirm", "--yes", "--config", cfgPath)
+	if err == nil || !strings.Contains(err.Error(), "refusing to replay") {
+		t.Fatalf("expected refusal, got err=%v\n%s", err, out)
+	}
+	if !strings.Contains(err.Error(), "orders") {
+		t.Errorf("refusal error = %q, want the destination name", err)
+	}
+
+	fb.mu.Lock()
+	published := len(fb.published)
+	acked := len(fb.acked)
+	fb.mu.Unlock()
+	if published != 0 || acked != 0 {
+		t.Fatalf("refused run performed I/O: published=%d acked=%d", published, acked)
+	}
+
+	store, err := audit.Open(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	entries, err := store.Recent(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Result != "refused" || !entries[0].Confirmed {
+		t.Fatalf("audit entries = %+v, want one confirmed refused entry", entries)
+	}
+	if !strings.Contains(entries[0].Reason, "orders") {
+		t.Errorf("refusal reason = %q, want the queue name", entries[0].Reason)
 	}
 }
 
