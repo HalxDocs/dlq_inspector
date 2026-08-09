@@ -25,6 +25,8 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"github.com/HalxDocs/dlq_inspector/internal/broker"
+	"github.com/HalxDocs/dlq_inspector/internal/broker/redisstream"
 	"github.com/HalxDocs/dlq_inspector/internal/command"
 	"github.com/HalxDocs/dlq_inspector/internal/config"
 	"github.com/HalxDocs/dlq_inspector/internal/recovery"
@@ -396,6 +398,71 @@ func TestRecoveryLoopPolicyOverRedis(t *testing.T) {
 	}
 	if !strings.Contains(out, "skipped") || !strings.Contains(out, "policy") {
 		t.Errorf("history missing the policy skip:\n%s", out)
+	}
+}
+
+// TestStatsPendingCounts proves the consumer-group pending surface end to
+// end: entries delivered to a consumer but not yet acknowledged live in the
+// group's PEL, and Stats — plus dlq stats — must report them as pending, so
+// an operator can see in-flight or stuck work at a glance.
+func TestStatsPendingCounts(t *testing.T) {
+	url := os.Getenv("DLQ_TEST_REDIS_URL")
+	if url == "" {
+		t.Skip("DLQ_TEST_REDIS_URL not set")
+	}
+	ctx := context.Background()
+	client := dialRedis(t, ctx, url)
+	defer client.Close()
+
+	name := fmt.Sprintf("orders-pending-%d", time.Now().UnixNano())
+	t.Cleanup(func() { _ = client.Del(ctx, name).Err() })
+
+	for i := 1; i <= 3; i++ {
+		if err := client.XAdd(ctx, &redis.XAddArgs{Stream: name, Values: map[string]any{
+			"payload": fmt.Sprintf(`{"order_id":%d}`, i),
+		}}).Err(); err != nil {
+			t.Fatalf("seed %d: %v", i, err)
+		}
+	}
+	// A consumer group reads two entries without acknowledging them: those
+	// two sit in the group's PEL as pending (work in flight or stuck).
+	if err := client.XGroupCreate(ctx, name, "workers", "0").Err(); err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	read, err := client.XReadGroup(ctx, &redis.XReadGroupArgs{
+		Group: "workers", Consumer: "worker-1", Streams: []string{name, ">"}, Count: 2,
+	}).Result()
+	if err != nil {
+		t.Fatalf("read group: %v", err)
+	}
+	if len(read) != 1 || len(read[0].Messages) != 2 {
+		t.Fatalf("read %d messages, want 2 pending", len(read[0].Messages))
+	}
+
+	// The adapter's Stats sums the group PELs into Pending.
+	a := &redisstream.Adapter{}
+	if err := a.Connect(ctx, broker.ConnectionConfig{URL: url}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer a.Close()
+	stats, err := a.Stats(ctx, name)
+	if err != nil {
+		t.Fatalf("Stats: %v", err)
+	}
+	if stats.Messages != 3 || stats.Consumers != 1 || stats.Pending != 2 {
+		t.Errorf("stats = %+v, want 3 messages, 1 consumer, 2 pending", stats)
+	}
+
+	// And dlq stats surfaces it for an operator.
+	cli := newRedisCLI(t, url, name)
+	out, err := cli.runErr("stats", "--config", cli.cfgPath)
+	if err != nil {
+		t.Fatalf("dlq stats: %v\n%s", err, out)
+	}
+	for _, want := range []string{"Pending:", "2", "Consumers:", "1"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("dlq stats output missing %q:\n%s", want, out)
+		}
 	}
 }
 

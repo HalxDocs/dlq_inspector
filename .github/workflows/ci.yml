@@ -61,7 +61,7 @@ jobs:
       - name: "Integration: full recovery loop"
         run: |
           go test -count=1 -v -run 'TestRecoveryLoop(EndToEnd|MissingDestination|Policy)|TestReplayMissingDestinationLive|TestConformance' ./internal/broker/rabbitmq/ | tee /tmp/recovery-rabbit.log
-          go test -count=1 -v -run 'TestRecoveryLoop(OverRedis|MissingDestinationOverRedis|PolicyOverRedis)|TestConformance|TestStatsMissingStream' ./internal/broker/redisstream/ | tee /tmp/recovery-redis.log
+          go test -count=1 -v -run 'TestRecoveryLoop(OverRedis|MissingDestinationOverRedis|PolicyOverRedis)|TestConformance|TestStats(MissingStream|PendingCounts)' ./internal/broker/redisstream/ | tee /tmp/recovery-redis.log
           grep -- '--- PASS: TestRecoveryLoopEndToEnd' /tmp/recovery-rabbit.log
           grep -- '--- PASS: TestRecoveryLoopMissingDestination' /tmp/recovery-rabbit.log
           grep -- '--- PASS: TestRecoveryLoopPolicy' /tmp/recovery-rabbit.log
@@ -72,3 +72,4 @@ jobs:
           grep -- '--- PASS: TestRecoveryLoopPolicyOverRedis' /tmp/recovery-redis.log
           grep -- '--- PASS: TestConformance' /tmp/recovery-redis.log
           grep -- '--- PASS: TestStatsMissingStream' /tmp/recovery-redis.log
+          grep -- '--- PASS: TestStatsPendingCounts' /tmp/recovery-redis.log
