@@ -352,9 +352,11 @@ modernc.org/sqlite embedded); README quickstart rewritten for the shipped CLI;
 (`internal/command/golden_test.go` + `testdata/*.golden`, regenerated with
 `go test ./internal/command/ -run TestGolden -update`) snapshotting analyze, plan,
 and recover --dry-run output — run in the CI Test step against the in-memory
-fixture, with volatile plan IDs/paths pinned to placeholders.
+fixture, with volatile plan IDs/paths pinned to placeholders; `docs/POLICIES.md`
+documenting the policy grammar, semantics, precedence, and CI usage (linked from
+the README).
 
-**Remaining:** `docs/ARCHITECTURE.md` and `docs/POLICIES.md`.
+**Remaining:** `docs/ARCHITECTURE.md`.
 
 **Post-1.0 adoption features (in priority order):**
 1. Interactive TUI (`dlq tui`) — k9s-style browsing + one-keystroke replay; the biggest

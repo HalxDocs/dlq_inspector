@@ -99,11 +99,12 @@ DLQ Inspector never mutates a queue outside the shared safety pipeline:
 
 The classifier is honest by design: `INVESTIGATE` is the default when signals are
 missing or conflict, and teams can encode their own judgment as committed YAML
-[policies](docs/COMMANDS.md#dlq-policy) that override the defaults.
+[policies](docs/POLICIES.md) that override the defaults.
 
 ## Documentation
 
 - [docs/COMMANDS.md](docs/COMMANDS.md) — full command reference
+- [docs/POLICIES.md](docs/POLICIES.md) — recovery policy YAML grammar and CI usage
 - [docs/PLAN.md](docs/PLAN.md) — architecture rationale and the phased build plan
 
 ## License
