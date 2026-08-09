@@ -33,12 +33,28 @@ func TestRegistered(t *testing.T) {
 	}
 }
 
-func TestRabbitMQStubReturnsNotImplemented(t *testing.T) {
+func TestRabbitMQConnectRejectsEmptyURL(t *testing.T) {
 	b, err := broker.New("rabbitmq")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := b.Connect(t.Context(), broker.ConnectionConfig{}); err != rabbitmq.ErrNotImplemented {
-		t.Fatalf("Connect() = %v, want ErrNotImplemented", err)
+	if err := b.Connect(t.Context(), broker.ConnectionConfig{}); err == nil {
+		t.Fatal("Connect() with empty URL expected error")
+	}
+}
+
+func TestRabbitMQRemainingStubs(t *testing.T) {
+	b, err := broker.New("rabbitmq")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Inspect(t.Context(), "q", "id"); err != rabbitmq.ErrNotImplemented {
+		t.Errorf("Inspect() = %v, want ErrNotImplemented", err)
+	}
+	if _, err := b.Search(t.Context(), "q", broker.SearchFilter{}); err != rabbitmq.ErrNotImplemented {
+		t.Errorf("Search() = %v, want ErrNotImplemented", err)
+	}
+	if err := b.Publish(t.Context(), "q", nil); err != rabbitmq.ErrNotImplemented {
+		t.Errorf("Publish() = %v, want ErrNotImplemented", err)
 	}
 }

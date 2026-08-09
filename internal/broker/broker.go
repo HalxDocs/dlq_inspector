@@ -37,6 +37,10 @@ type ConnectionConfig struct {
 	URL string
 	// Queue is the default queue the CLI operates on, when set.
 	Queue string
+	// ManagementURL is the broker's management API base URL, when the broker
+	// exposes one (e.g. RabbitMQ's management plugin). Empty means "derive or
+	// not available".
+	ManagementURL string
 }
 
 // QueueSummary describes a queue visible to the connection.
