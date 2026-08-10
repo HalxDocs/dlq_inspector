@@ -1,0 +1,30 @@
+# Local brokers for the dlq walkthrough (docs/TESTING.md).
+#
+#   docker compose up -d
+#   docker compose ps          # wait until both report healthy
+#
+# RabbitMQ:   AMQP amqp://guest:guest@localhost:5672/   management http://localhost:15672/ (guest/guest)
+# Redis:      redis://localhost:6379/0
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: dlq-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    container_name: dlq-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
