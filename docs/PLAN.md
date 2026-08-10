@@ -368,7 +368,9 @@ published on 2026-08-10** (tagged, goreleaser release with the 6-archive matrix 
 `checksums.txt`, verified end to end by `dlq self-update` installing from it).
 `docs/TESTING.md` documents a verified hands-on walkthrough (brokers up via
 `docker compose`, seed a DLQ with `cmd/seed`, drive analyze/plan/recover/
-history/rollback/patch/policy on both brokers) plus the automated suite.
+history/rollback/patch/policy on both brokers) plus the automated suite,
+with real terminal captures rendered into `docs/screenshots/` (13 PNGs,
+regenerated from live transcripts) and embedded in the guide.
 
 Testing the walkthrough against live brokers (RabbitMQ + Redis 5) surfaced
 three real bugs, all fixed: the management read path ignored the `x-destination`

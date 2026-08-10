@@ -53,7 +53,10 @@ dlq self-update --confirm    # download, verify, and install it
 Want to *see* it work in the next ten minutes? [docs/TESTING.md](docs/TESTING.md) walks
 you through starting brokers, seeding a DLQ with failing messages, and driving the
 whole workflow hands-on — every command in it is verified against live RabbitMQ and
-Redis. The quickstart below assumes messages are already sitting in a DLQ.
+Redis, with real terminal captures ([screenshot gallery](docs/screenshots/)). The
+quickstart below assumes messages are already sitting in a DLQ.
+
+![dlq analyze](./docs/screenshots/03-analyze.png)
 
 Point the tool at your broker once, then work a real DLQ end to end:
 
