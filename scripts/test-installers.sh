@@ -29,6 +29,13 @@ BASE="http://127.0.0.1:$PORT"
 PWSH=""
 if command -v pwsh >/dev/null 2>&1; then PWSH=pwsh; elif command -v powershell >/dev/null 2>&1; then PWSH=powershell; fi
 
+# The PowerShell installer is cross-platform: it installs dlq.exe on Windows
+# and dlq elsewhere. Assert whichever name applies to this host.
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*) PS_BIN_NAME="dlq.exe" ;;
+  *) PS_BIN_NAME="dlq" ;;
+esac
+
 # Git Bash passes /tmp/... virtual paths to native Windows programs via MSYS
 # conversion, which PowerShell mishandles; convert explicitly where present.
 if command -v cygpath >/dev/null 2>&1; then
@@ -144,7 +151,7 @@ PS_EXIT=$?
 set -e
 if [[ $PS_EXIT -ne 0 ]]; then cat "$WORK/ps-good.log" >&2; fail "powershell installer failed on the control path (exit $PS_EXIT)"; fi
 grep -qi "checksum verified" "$WORK/ps-good.log" || fail "powershell installer did not report checksum verification"
-[[ -f "$WORK/ps-out-good/dlq.exe" ]] || fail "powershell installer did not install the binary"
+[[ -f "$WORK/ps-out-good/$PS_BIN_NAME" ]] || fail "powershell installer did not install the binary"
 echo "PASS powershell installer control"
 
 echo "== powershell installer: negative (corrupted archive)"
@@ -155,7 +162,7 @@ if "$PWSH" -NoProfile -ExecutionPolicy Bypass -File "$WIN_ROOT/scripts/install.p
   fail "powershell installer accepted a corrupted archive (exit 0)"
 fi
 grep -qi "checksum" "$WORK/ps-bad.log" || { cat "$WORK/ps-bad.log" >&2; fail "powershell installer did not report a checksum failure"; }
-[[ ! -e "$WORK/ps-out-bad/dlq.exe" ]] || fail "powershell installer installed a binary despite the checksum mismatch"
+[[ ! -e "$WORK/ps-out-bad/$PS_BIN_NAME" ]] || fail "powershell installer installed a binary despite the checksum mismatch"
 echo "PASS powershell installer refuses corrupted archive"
 
 echo

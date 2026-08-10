@@ -1,17 +1,19 @@
 <#
 .DESCRIPTION
-DLQ Inspector — one-command installer for Windows.
+DLQ Inspector — one-command installer for Windows, macOS, and Linux.
 
 Downloads the latest release binary for your platform, verifies it against the
-release's checksums.txt, and installs it. No Go toolchain required.
+release's checksums.txt, and installs it. No Go toolchain required. Works in
+Windows PowerShell 5.1 and PowerShell 7+ on any OS.
 
 Usage:
   irm https://raw.githubusercontent.com/HalxDocs/dlq_inspector/main/scripts/install.ps1 | iex
 
 Parameters:
   -Version      Specific release tag to install (default: latest)
-  -InstallDir   Install location (default: $env:LOCALAPPDATA\dlq)
-  -NoPath       Skip adding InstallDir to the user PATH
+  -InstallDir   Install location (default: $env:LOCALAPPDATA\dlq on Windows,
+                ~/.local/bin elsewhere)
+  -NoPath       Skip adding InstallDir to the PATH
   -BaseUrl      Test hook: serve the release assets from a local mirror
                 instead of github.com (used by scripts/test-installers.sh)
 #>
@@ -29,8 +31,27 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 $Repo = "HalxDocs/dlq_inspector"
 
+# Detect the platform. $IsWindows/$IsLinux/$IsMacOS exist in PowerShell 7+;
+# Windows PowerShell 5.1 leaves them $null, so fall back to PlatformID.
+if ($IsWindows) { $os = "windows" }
+elseif ($IsMacOS) { $os = "darwin" }
+elseif ($IsLinux) { $os = "linux" }
+elseif ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) { $os = "windows" }
+else { throw "Unsupported OS: $([Environment]::OSVersion.Platform)" }
+
+$arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+switch ($arch) {
+  "X64" { $arch = "amd64" }
+  "Arm64" { $arch = "arm64" }
+  default { throw "Unsupported architecture: $arch" }
+}
+
 if ([string]::IsNullOrEmpty($InstallDir)) {
-  $InstallDir = Join-Path $env:LOCALAPPDATA "dlq"
+  if ($os -eq "windows") {
+    $InstallDir = Join-Path $env:LOCALAPPDATA "dlq"
+  } else {
+    $InstallDir = "$HOME/.local/bin"
+  }
 }
 
 # Resolve the release tag (latest, or the pinned -Version).
@@ -41,21 +62,15 @@ if ([string]::IsNullOrEmpty($Version)) {
 $tag = $Version
 $ver = $tag.TrimStart("v")
 
-$arch = $env:PROCESSOR_ARCHITECTURE
-switch ($arch) {
-  "AMD64" { $arch = "amd64" }
-  "ARM64" { $arch = "arm64" }
-  default { throw "Unsupported architecture: $arch" }
-}
-
-$asset = "dlq-inspector_${ver}_windows_${arch}.zip"
+$ext = if ($os -eq "windows") { "zip" } else { "tar.gz" }
+$asset = "dlq-inspector_${ver}_${os}_${arch}.${ext}"
 if ([string]::IsNullOrEmpty($BaseUrl)) {
   $baseUrl = "https://github.com/$Repo/releases/download/$tag"
 } else {
   $baseUrl = $BaseUrl
 }
 
-Write-Host "DLQ Inspector $tag (windows/$arch)"
+Write-Host "DLQ Inspector $tag ($os/$arch)"
 Write-Host "Downloading $asset ..."
 
 $tmp = Join-Path $env:TEMP ("dlq-install-" + [guid]::NewGuid().ToString("N"))
@@ -76,11 +91,19 @@ try {
   if ($expected -ne $actual) { throw "Checksum verification FAILED for $asset" }
   Write-Host "Checksum verified (sha256)."
 
-  Expand-Archive -Path $zip -DestinationPath $tmp -Force
+  if ($os -eq "windows") {
+    Expand-Archive -Path $zip -DestinationPath $tmp -Force
+    $extracted = Join-Path $tmp "dlq.exe"
+    $binName = "dlq.exe"
+  } else {
+    & tar -xzf $zip -C $tmp
+    $extracted = Join-Path $tmp "dlq"
+    $binName = "dlq"
+  }
   New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
-  Copy-Item -Path (Join-Path $tmp "dlq.exe") -Destination $InstallDir -Force
+  Copy-Item -Path $extracted -Destination $InstallDir -Force
 
-  $bin = Join-Path $InstallDir "dlq.exe"
+  $bin = Join-Path $InstallDir $binName
   Write-Host "Installed to $bin"
   & $bin version
 

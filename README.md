@@ -36,7 +36,7 @@ against the release `checksums.txt`, and puts it on your PATH:
 # macOS / Linux (bash)
 curl -fsSL https://raw.githubusercontent.com/HalxDocs/dlq_inspector/main/scripts/install.sh | bash
 
-# Windows (PowerShell)
+# Windows, or any OS with PowerShell 7+
 irm https://raw.githubusercontent.com/HalxDocs/dlq_inspector/main/scripts/install.ps1 | iex
 ```
 
