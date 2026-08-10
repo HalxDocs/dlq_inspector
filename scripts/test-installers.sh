@@ -143,7 +143,19 @@ grep -qi "checksum" "$WORK/bad.log" || { cat "$WORK/bad.log" >&2; fail "bash ins
 echo "PASS bash installer refuses corrupted archive"
 
 # --- PowerShell installer ----------------------------------------------------
-echo "== powershell installer: control (good archive)"
+# The ps1 downloads the asset for the HOST platform: on Linux/macOS that is the
+# linux/darwin tar.gz (which the bash negative test just corrupted), on Windows
+# the windows zip. Restore the linux archive and refresh checksums.txt first,
+# then corrupt whichever asset the ps1 will actually fetch.
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*) PS_OS="windows"; PS_ASSET="$WIN_ASSET" ;;
+  *) PS_OS="linux"; PS_ASSET="$LINUX_ASSET" ;;
+esac
+
+tar -C "$FAKE/linux" -czf "$FAKE/$LINUX_ASSET" dlq
+write_checksums
+
+echo "== powershell installer: control (good $PS_OS archive)"
 set +e
 "$PWSH" -NoProfile -ExecutionPolicy Bypass -File "$WIN_ROOT/scripts/install.ps1" \
   -Version v1.0.0 -BaseUrl "$BASE" -InstallDir "$WIN_WORK/ps-out-good" -NoPath > "$WORK/ps-good.log" 2>&1
@@ -154,8 +166,8 @@ grep -qi "checksum verified" "$WORK/ps-good.log" || fail "powershell installer d
 [[ -f "$WORK/ps-out-good/$PS_BIN_NAME" ]] || fail "powershell installer did not install the binary"
 echo "PASS powershell installer control"
 
-echo "== powershell installer: negative (corrupted archive)"
-printf 'CORRUPTED-ARCHIVE-BYTES-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' > "$FAKE/$WIN_ASSET"
+echo "== powershell installer: negative (corrupted $PS_OS archive)"
+printf 'CORRUPTED-ARCHIVE-BYTES-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' > "$FAKE/$PS_ASSET"
 if "$PWSH" -NoProfile -ExecutionPolicy Bypass -File "$WIN_ROOT/scripts/install.ps1" \
   -Version v1.0.0 -BaseUrl "$BASE" -InstallDir "$WIN_WORK/ps-out-bad" -NoPath > "$WORK/ps-bad.log" 2>&1; then
   cat "$WORK/ps-bad.log" >&2
