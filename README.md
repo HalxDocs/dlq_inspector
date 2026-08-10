@@ -40,6 +40,14 @@ curl -fsSL https://raw.githubusercontent.com/HalxDocs/dlq_inspector/main/scripts
 irm https://raw.githubusercontent.com/HalxDocs/dlq_inspector/main/scripts/install.ps1 | iex
 ```
 
+macOS users can also install via [Homebrew](https://github.com/HalxDocs/homebrew-tap)
+(newer Homebrew will ask you to approve the third-party tap):
+
+```bash
+brew tap HalxDocs/homebrew-tap
+brew install dlq-inspector
+```
+
 Or download the static binary for your platform from a
 [release](https://github.com/HalxDocs/dlq_inspector/releases) — no runtime
 dependencies, no cgo.
