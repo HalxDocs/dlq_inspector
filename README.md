@@ -146,6 +146,24 @@ missing or conflict, and teams can encode their own judgment as committed YAML
 - [docs/POLICIES.md](docs/POLICIES.md) — recovery policy YAML grammar and CI usage
 - [docs/PLAN.md](docs/PLAN.md) — architecture rationale and the phased build plan
 
+## Support
+
+- **Questions & discussion** — open a [Discussion](https://github.com/HalxDocs/dlq_inspector/discussions)
+  (Q&A for how-to questions, General for anything else).
+- **Bug reports & feature requests** — file an [Issue](https://github.com/HalxDocs/dlq_inspector/issues);
+  include the exact command, broker type/version, and what you expected vs. what happened.
+- **Security vulnerabilities** — **do not** open a public issue. Report privately via
+  [SECURITY.md](SECURITY.md) (private advisory or direct email); you'll get an
+  acknowledgement within 3 business days.
+- **Contributing** — see [CONTRIBUTING.md](CONTRIBUTING.md) for the dev setup,
+  test suite, and commit conventions.
+- **Code of conduct** — [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) applies in all
+  community spaces.
+
+Support is provided on a best-effort basis by the maintainer. The classifier
+and safety pipeline are intentionally conservative — when in doubt, a message
+stays untouched.
+
 ## License
 
 [MIT](LICENSE)
