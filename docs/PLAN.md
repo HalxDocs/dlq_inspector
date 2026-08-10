@@ -363,8 +363,10 @@ documenting the policy grammar, semantics, precedence, and CI usage (linked from
   and PR (with artifacts uploaded from pushes), so release-config drift fails the
   workflow instead of the first real release, plus a `go mod tidy` drift guard.
 
-**Release gate: complete.** Phase 10 release items are all done. Post-1.0 adoption
-features below remain open.
+**Release gate: complete.** Phase 10 release items are all done. **v1.0.0 was
+published on 2026-08-10** (tagged, goreleaser release with the 6-archive matrix +
+`checksums.txt`, verified end to end by `dlq self-update` installing from it).
+Post-1.0 adoption features below remain open.
 
 **Post-1.0 adoption features (in priority order):**
 1. Interactive TUI (`dlq tui`) — k9s-style browsing + one-keystroke replay; the biggest
