@@ -13,6 +13,9 @@
 #   DLQ_OS            - force OS: linux | darwin
 #   DLQ_ARCH          - force arch: amd64 | arm64
 #   DLQ_INSTALL_DIR   - install location (default: ~/.local/bin)
+#   DLQ_BASE_URL      - test hook: serve the release assets from a local
+#                       mirror instead of github.com (used by
+#                       scripts/test-installers.sh)
 #
 set -euo pipefail
 
@@ -86,7 +89,7 @@ resolve_version() {
 TAG="$(resolve_version)"
 VER="${TAG#v}"
 ASSET="dlq-inspector_${VER}_${OS}_${ARCH}.tar.gz"
-BASE_URL="https://github.com/$REPO/releases/download/$TAG"
+BASE_URL="${DLQ_BASE_URL:-https://github.com/$REPO/releases/download/$TAG}"
 
 echo "DLQ Inspector $TAG ($OS/$ARCH)"
 echo "Downloading $ASSET ..."

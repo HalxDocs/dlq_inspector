@@ -83,6 +83,23 @@ jobs:
           grep -- '--- PASS: TestQueuesShowsPending' /tmp/recovery-redis.log
           grep -- '--- PASS: TestRecoveryPendingBacklogWarning' /tmp/recovery-redis.log
 
+  # The one-command installers must never install a corrupted binary: serve a
+  # fake release tree from a local HTTP server, prove the control path installs
+  # on both bash and PowerShell, then corrupt the archive and assert both
+  # installers fail with a checksum error and leave nothing behind.
+  installers:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+
+      - name: Installer control + checksum-refusal tests
+        run: bash scripts/test-installers.sh
+
   # Build the full cross-platform release matrix on every push and PR so
   # config drift (wrong template keys, bad ldflags, a broken archive step) is
   # caught at commit time instead of at release time. Snapshot artifacts are

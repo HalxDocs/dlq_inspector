@@ -12,12 +12,15 @@ Parameters:
   -Version      Specific release tag to install (default: latest)
   -InstallDir   Install location (default: $env:LOCALAPPDATA\dlq)
   -NoPath       Skip adding InstallDir to the user PATH
+  -BaseUrl      Test hook: serve the release assets from a local mirror
+                instead of github.com (used by scripts/test-installers.sh)
 #>
 [CmdletBinding()]
 param(
   [string]$Version = "",
   [string]$InstallDir = "",
-  [switch]$NoPath
+  [switch]$NoPath,
+  [string]$BaseUrl = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -46,7 +49,11 @@ switch ($arch) {
 }
 
 $asset = "dlq-inspector_${ver}_windows_${arch}.zip"
-$baseUrl = "https://github.com/$Repo/releases/download/$tag"
+if ([string]::IsNullOrEmpty($BaseUrl)) {
+  $baseUrl = "https://github.com/$Repo/releases/download/$tag"
+} else {
+  $baseUrl = $BaseUrl
+}
 
 Write-Host "DLQ Inspector $tag (windows/$arch)"
 Write-Host "Downloading $asset ..."
