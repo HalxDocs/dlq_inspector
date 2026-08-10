@@ -28,17 +28,28 @@ audit trail. Think `htop` or `kubectl`, but for failed asynchronous work.
 
 ## Install
 
-```bash
-# From source (Go 1.26+)
-go install github.com/HalxDocs/dlq_inspector/cmd/dlq@latest
+**No Go required** — the release ships static binaries for macOS, Linux, and
+Windows (amd64 + arm64). One command installs the latest release, verifies it
+against the release `checksums.txt`, and puts it on your PATH:
 
-# Or build from a checkout
-make build          # produces bin/dlq
+```bash
+# macOS / Linux (bash)
+curl -fsSL https://raw.githubusercontent.com/HalxDocs/dlq_inspector/main/scripts/install.sh | bash
+
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/HalxDocs/dlq_inspector/main/scripts/install.ps1 | iex
 ```
 
 Or download the static binary for your platform from a
 [release](https://github.com/HalxDocs/dlq_inspector/releases) — no runtime
 dependencies, no cgo.
+
+Building from source (requires Go 1.26+):
+
+```bash
+go install github.com/HalxDocs/dlq_inspector/cmd/dlq@latest
+# or: make build   # produces bin/dlq
+```
 
 Upgrade an existing install (downloads the release archive for your platform,
 verifies it against the release `checksums.txt`, then swaps the binary):
