@@ -64,9 +64,15 @@ func (a *Adapter) ListQueues(ctx context.Context) ([]broker.QueueSummary, error)
 	}
 
 	var out []broker.QueueSummary
-	iter := a.conn.client.ScanType(ctx, 0, "*", 1000, "stream").Iterator()
+	// SCAN with the TYPE filter needs Redis 6+. A plain SCAN plus a per-key
+	// TYPE check works on every version (Redis 5 is still widely deployed)
+	// and costs one O(1) TYPE per key.
+	iter := a.conn.client.Scan(ctx, 0, "*", 1000).Iterator()
 	for iter.Next(ctx) {
 		name := iter.Val()
+		if kt, err := a.conn.client.Type(ctx, name).Result(); err != nil || kt != "stream" {
+			continue
+		}
 		qs := broker.QueueSummary{Name: name}
 		if n, err := a.conn.client.XLen(ctx, name).Result(); err == nil {
 			qs.Messages = int(n)

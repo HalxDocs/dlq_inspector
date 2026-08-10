@@ -57,6 +57,33 @@ func TestConnectRejectsBadScheme(t *testing.T) {
 	}
 }
 
+func TestConnectRedisStreamAcceptsRedisScheme(t *testing.T) {
+	out, err := runCommand(t, "connect", "redisstream", "--url", "redis://localhost:6379/0",
+		"--profile", "dev", "--default-queue", "orders-dlq", "--config", filepath.Join(t.TempDir(), "config.yaml"))
+	if err != nil {
+		t.Fatalf("connect redisstream: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, `Saved profile "dev"`) {
+		t.Errorf("output = %q", out)
+	}
+}
+
+func TestConnectRedisStreamRejectsAmqpScheme(t *testing.T) {
+	_, err := runCommand(t, "connect", "redisstream", "--url", "amqp://localhost:5672/",
+		"--config", filepath.Join(t.TempDir(), "config.yaml"))
+	if err == nil || !strings.Contains(err.Error(), "unsupported URL scheme \"amqp\" for redisstream") {
+		t.Fatalf("expected scheme error for redisstream, got %v", err)
+	}
+}
+
+func TestConnectRabbitMQRejectsRedisScheme(t *testing.T) {
+	_, err := runCommand(t, "connect", "rabbitmq", "--url", "redis://localhost:6379/0",
+		"--config", filepath.Join(t.TempDir(), "config.yaml"))
+	if err == nil || !strings.Contains(err.Error(), "unsupported URL scheme \"redis\" for rabbitmq") {
+		t.Fatalf("expected scheme error for rabbitmq, got %v", err)
+	}
+}
+
 func TestConnectRejectsBothURLAndEnv(t *testing.T) {
 	_, err := runCommand(t, "connect", "rabbitmq", "--url", "amqp://localhost:5672/",
 		"--url-env", "DLQ_URL", "--config", filepath.Join(t.TempDir(), "config.yaml"))

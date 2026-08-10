@@ -42,7 +42,7 @@ Prefer --url-env (the name of an environment variable holding the URL) over
 				return fmt.Errorf("one of --url or --url-env is required")
 			}
 			if co.url != "" {
-				if err := validateAmqpURL(co.url); err != nil {
+				if err := validateURL(brokerName, co.url); err != nil {
 					return err
 				}
 			}
@@ -87,7 +87,7 @@ Prefer --url-env (the name of an environment variable holding the URL) over
 		},
 	}
 
-	cmd.Flags().StringVar(&co.url, "url", "", "connection URL (amqp:// or amqps://)")
+	cmd.Flags().StringVar(&co.url, "url", "", "connection URL (amqp:// or amqps:// for rabbitmq; redis:// or rediss:// for redisstream)")
 	cmd.Flags().StringVar(&co.urlEnv, "url-env", "", "environment variable holding the connection URL (preferred; keeps secrets out of the config file)")
 	cmd.Flags().StringVar(&co.defaultQueue, "default-queue", "", "default queue to operate on")
 	cmd.Flags().StringVar(&co.managementURL, "management-url", "", "management API base URL (defaults to the AMQP host on port 15672)")
@@ -95,13 +95,23 @@ Prefer --url-env (the name of an environment variable holding the URL) over
 	return cmd
 }
 
-func validateAmqpURL(raw string) error {
+// validateURL checks the URL scheme against the broker's expected scheme,
+// so `dlq connect redisstream --url redis://...` works and a rabbitmq URL is
+// not silently accepted for Redis (or vice versa).
+func validateURL(brokerName, raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return fmt.Errorf("invalid connection URL: %w", err)
 	}
-	if u.Scheme != "amqp" && u.Scheme != "amqps" {
-		return fmt.Errorf("unsupported URL scheme %q (want amqp or amqps)", u.Scheme)
+	switch brokerName {
+	case "rabbitmq":
+		if u.Scheme != "amqp" && u.Scheme != "amqps" {
+			return fmt.Errorf("unsupported URL scheme %q for rabbitmq (want amqp or amqps)", u.Scheme)
+		}
+	case "redisstream":
+		if u.Scheme != "redis" && u.Scheme != "rediss" {
+			return fmt.Errorf("unsupported URL scheme %q for redisstream (want redis or rediss)", u.Scheme)
+		}
 	}
 	return nil
 }

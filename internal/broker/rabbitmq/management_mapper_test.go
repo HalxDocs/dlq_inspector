@@ -54,6 +54,36 @@ func TestToMessageFromMgmtTextPayload(t *testing.T) {
 	}
 }
 
+// TestToMessageFromMgmtDestinationFallback pins the rollback round-trip on
+// the management read path: a restored message carries the original replay
+// destination as an x-destination header (no x-death — it is stripped on
+// republish), and the mgmt mapper must resolve it so inspect/patch/replay
+// work on rolled-back messages without an explicit --destination.
+func TestToMessageFromMgmtDestinationFallback(t *testing.T) {
+	m := toMessageFromMgmt(mgmtMsg(t, `{
+		"payload": "{}",
+		"payload_encoding": "string",
+		"properties": {"headers": {"x-destination": "orders"}}
+	}`), "orders-dlq")
+	if m.Destination != "orders" {
+		t.Errorf("Destination = %q, want the x-destination fallback", m.Destination)
+	}
+}
+
+func TestToMessageFromMgmtDestinationPrefersXDeath(t *testing.T) {
+	m := toMessageFromMgmt(mgmtMsg(t, `{
+		"payload": "{}",
+		"payload_encoding": "string",
+		"properties": {"headers": {
+			"x-destination": "orders",
+			"x-death": [{"queue": "orders-v2", "count": 1, "reason": "rejected"}]
+		}}
+	}`), "orders-dlq")
+	if m.Destination != "orders-v2" {
+		t.Errorf("Destination = %q, want x-death to win", m.Destination)
+	}
+}
+
 func TestToMessageFromMgmtBase64Payload(t *testing.T) {
 	// "binary\x00data" is not valid UTF-8, so the management API base64-encodes it.
 	m := toMessageFromMgmt(mgmtMsg(t, `{

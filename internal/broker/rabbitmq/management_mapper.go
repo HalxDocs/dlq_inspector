@@ -34,6 +34,13 @@ func toMessageFromMgmt(m mgmtMessage, queue string) message.Message {
 	payload := decodeMgmtPayload(m.Payload, m.PayloadEncoding)
 	headers := normalizeJSONHeaders(m.Properties.Headers)
 	destination, retries, reason := deathInfoJSON(m.Properties.Headers)
+	// Rolled-back messages carry the original replay destination as an
+	// x-destination header (they have no x-death — it is stripped on
+	// republish), so a future plan can still replay them; x-death wins when
+	// both are present, mirroring the AMQP path.
+	if destination == "" {
+		destination = headers["x-destination"]
+	}
 	eventID, idemKey := extractIDs(headers)
 
 	return message.Message{
