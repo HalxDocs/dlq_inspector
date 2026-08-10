@@ -353,9 +353,15 @@ modernc.org/sqlite embedded); README quickstart rewritten for the shipped CLI;
 `go test ./internal/command/ -run TestGolden -update`) snapshotting analyze, plan,
 and recover --dry-run output — run in the CI Test step against the in-memory
 fixture, with volatile plan IDs/paths pinned to placeholders; `docs/POLICIES.md`
-documenting the policy grammar, semantics, precedence, and CI usage (linked from
-the README); `docs/ARCHITECTURE.md` capturing the layered design, the Broker
-contract, the recovery engine, and the adapter-isolation rules.
+documenting the policy grammar, semantics, precedence, and CI usage (linked fromthe README); `docs/ARCHITECTURE.md` capturing the layered design, the Broker
+  contract, the recovery engine, and the adapter-isolation rules.
+- `dlq self-update` — checks the latest GitHub release and installs it after
+  verifying the archive's sha256 against the release `checksums.txt` (refuses on
+  mismatch or missing checksum); atomic swap on Linux/macOS, deferred replacement
+  via a companion script on Windows; `--check` exits 0/1/2 for scripts.
+- CI runs a goreleaser snapshot build of the full 6-target matrix on every push
+  and PR (with artifacts uploaded from pushes), so release-config drift fails the
+  workflow instead of the first real release, plus a `go mod tidy` drift guard.
 
 **Release gate: complete.** Phase 10 release items are all done. Post-1.0 adoption
 features below remain open.

@@ -44,6 +44,13 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Go mod tidy drift guard
+        # before.hooks runs `go mod tidy` in goreleaser; keep the committed
+        # go.mod/go.sum in sync so a release build never mutates the tree.
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
       - name: Test
         # -count=1: setup-go persists the Go cache across runs, and go test's
         # result cache does not include environment variables in its key -- a
@@ -75,3 +82,36 @@ jobs:
           grep -- '--- PASS: TestStatsPendingCounts' /tmp/recovery-redis.log
           grep -- '--- PASS: TestQueuesShowsPending' /tmp/recovery-redis.log
           grep -- '--- PASS: TestRecoveryPendingBacklogWarning' /tmp/recovery-redis.log
+
+  # Build the full cross-platform release matrix on every push and PR so
+  # config drift (wrong template keys, bad ldflags, a broken archive step) is
+  # caught at commit time instead of at release time. Snapshot artifacts are
+  # uploaded from pushes; PR runs build-only.
+  release-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --snapshot --clean
+
+      - name: Upload snapshot artifacts (pushes only)
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dlq-snapshot-${{ github.sha }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+            dist/artifacts.json
+          retention-days: 30
