@@ -83,6 +83,25 @@ jobs:
           grep -- '--- PASS: TestQueuesShowsPending' /tmp/recovery-redis.log
           grep -- '--- PASS: TestRecoveryPendingBacklogWarning' /tmp/recovery-redis.log
 
+  # The Homebrew tap must keep working end to end: macos runners ship
+  # Homebrew, so tap HalxDocs/homebrew-tap, install dlq-inspector (which
+  # downloads the darwin archive and verifies its pinned sha256), and run the
+  # installed binary. A formula that drifted from the release assets fails
+  # the main repo's build at commit time.
+  brew-tap:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dlq-inspector from the Homebrew tap
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+        run: |
+          brew tap HalxDocs/homebrew-tap
+          brew install dlq-inspector
+          dlq version
+
   # The one-command installers must never install a corrupted binary: serve a
   # fake release tree from a local HTTP server, prove the control path installs
   # on both bash and PowerShell, then corrupt the archive and assert both
