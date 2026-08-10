@@ -99,6 +99,8 @@ jobs:
           HOMEBREW_NO_AUTO_UPDATE: 1
         run: |
           brew tap HalxDocs/homebrew-tap
+          # Newer Homebrew refuses formulas from untrusted third-party taps.
+          brew trust halxdocs/tap
           brew install dlq-inspector
           dlq version
 
