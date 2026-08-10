@@ -366,7 +366,16 @@ documenting the policy grammar, semantics, precedence, and CI usage (linked from
 **Release gate: complete.** Phase 10 release items are all done. **v1.0.0 was
 published on 2026-08-10** (tagged, goreleaser release with the 6-archive matrix +
 `checksums.txt`, verified end to end by `dlq self-update` installing from it).
-Post-1.0 adoption features below remain open.
+`docs/TESTING.md` documents a verified hands-on walkthrough (brokers up via
+`docker compose`, seed a DLQ with `cmd/seed`, drive analyze/plan/recover/
+history/rollback/patch/policy on both brokers) plus the automated suite.
+
+Testing the walkthrough against live brokers (RabbitMQ + Redis 5) surfaced
+three real bugs, all fixed: the management read path ignored the `x-destination`
+fallback so rolled-back messages could not be patched/replayed; `dlq connect
+redisstream --url redis://…` was impossible (scheme validation was AMQP-only);
+and `dlq queues` broke on Redis 5 (`SCAN TYPE` needs 6+ — now plain SCAN +
+per-key TYPE check). Post-1.0 adoption features below remain open.
 
 **Post-1.0 adoption features (in priority order):**
 1. Interactive TUI (`dlq tui`) — k9s-style browsing + one-keystroke replay; the biggest

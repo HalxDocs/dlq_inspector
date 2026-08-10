@@ -1,5 +1,7 @@
 # DLQ Inspector
 
+[![CI](https://github.com/HalxDocs/dlq_inspector/actions/workflows/ci.yml/badge.svg)](https://github.com/HalxDocs/dlq_inspector/actions/workflows/ci.yml)
+
 A local-first CLI for inspecting, analyzing, classifying, and **safely** recovering
 failed messages from dead-letter queues.
 
@@ -27,7 +29,7 @@ audit trail. Think `htop` or `kubectl`, but for failed asynchronous work.
 ## Install
 
 ```bash
-# From source (Go 1.21+)
+# From source (Go 1.26+)
 go install github.com/HalxDocs/dlq_inspector/cmd/dlq@latest
 
 # Or build from a checkout
@@ -47,6 +49,11 @@ dlq self-update --confirm    # download, verify, and install it
 ```
 
 ## Quickstart
+
+Want to *see* it work in the next ten minutes? [docs/TESTING.md](docs/TESTING.md) walks
+you through starting brokers, seeding a DLQ with failing messages, and driving the
+whole workflow hands-on — every command in it is verified against live RabbitMQ and
+Redis. The quickstart below assumes messages are already sitting in a DLQ.
 
 Point the tool at your broker once, then work a real DLQ end to end:
 
@@ -111,6 +118,7 @@ missing or conflict, and teams can encode their own judgment as committed YAML
 
 ## Documentation
 
+- [docs/TESTING.md](docs/TESTING.md) — hands-on walkthrough and how to run the test suite
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — layered design, Broker contract, safety gate
 - [docs/COMMANDS.md](docs/COMMANDS.md) — full command reference
 - [docs/POLICIES.md](docs/POLICIES.md) — recovery policy YAML grammar and CI usage
