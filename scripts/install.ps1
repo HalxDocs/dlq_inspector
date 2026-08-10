@@ -73,7 +73,9 @@ if ([string]::IsNullOrEmpty($BaseUrl)) {
 Write-Host "DLQ Inspector $tag ($os/$arch)"
 Write-Host "Downloading $asset ..."
 
-$tmp = Join-Path $env:TEMP ("dlq-install-" + [guid]::NewGuid().ToString("N"))
+# GetTempPath() works on Windows (TEMP) and Unix ($TMPDIR or /tmp); the
+# Windows-only $env:TEMP is null under pwsh on macOS/Linux.
+$tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("dlq-install-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $tmp | Out-Null
 try {
   $zip = Join-Path $tmp $asset
