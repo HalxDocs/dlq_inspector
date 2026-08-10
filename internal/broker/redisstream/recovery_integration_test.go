@@ -50,10 +50,7 @@ func TestRecoveryLoopOverRedis(t *testing.T) {
 	dlq := source + "-dlq"
 
 	emptyStream(t, ctx, client, source)
-	t.Cleanup(func() {
-		_ = client.Del(ctx, source).Err()
-		_ = client.Del(ctx, dlq).Err()
-	})
+	cleanupStreams(t, url, source, dlq)
 
 	for i := 1; i <= 3; i++ {
 		if err := client.XAdd(ctx, &redis.XAddArgs{Stream: dlq, Values: map[string]any{
@@ -207,7 +204,7 @@ func TestRecoveryLoopMissingDestinationOverRedis(t *testing.T) {
 	}}).Err(); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	t.Cleanup(func() { _ = client.Del(ctx, dlq).Err() })
+	cleanupStreams(t, url, dlq)
 	waitStreamDepth(t, ctx, client, dlq, 1)
 
 	cli := newRedisCLI(t, url, dlq)
@@ -293,10 +290,7 @@ func TestRecoveryLoopPolicyOverRedis(t *testing.T) {
 	dlq := source + "-dlq"
 
 	emptyStream(t, ctx, client, source)
-	t.Cleanup(func() {
-		_ = client.Del(ctx, source).Err()
-		_ = client.Del(ctx, dlq).Err()
-	})
+	cleanupStreams(t, url, source, dlq)
 
 	seed := func(payload, headers string) {
 		t.Helper()
@@ -415,7 +409,7 @@ func TestStatsPendingCounts(t *testing.T) {
 	defer client.Close()
 
 	name := fmt.Sprintf("orders-pending-%d", time.Now().UnixNano())
-	t.Cleanup(func() { _ = client.Del(ctx, name).Err() })
+	cleanupStreams(t, url, name)
 
 	for i := 1; i <= 3; i++ {
 		if err := client.XAdd(ctx, &redis.XAddArgs{Stream: name, Values: map[string]any{
@@ -485,7 +479,7 @@ func TestQueuesShowsPending(t *testing.T) {
 	defer client.Close()
 
 	name := fmt.Sprintf("orders-pending-%d", time.Now().UnixNano())
-	t.Cleanup(func() { _ = client.Del(ctx, name).Err() })
+	cleanupStreams(t, url, name)
 
 	for i := 1; i <= 3; i++ {
 		if err := client.XAdd(ctx, &redis.XAddArgs{Stream: name, Values: map[string]any{
@@ -573,10 +567,7 @@ func TestRecoveryPendingBacklogWarning(t *testing.T) {
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 	source := "orders-" + suffix
 	dlq := source + "-dlq"
-	t.Cleanup(func() {
-		_ = client.Del(ctx, source).Err()
-		_ = client.Del(ctx, dlq).Err()
-	})
+	cleanupStreams(t, url, source, dlq)
 
 	// The destination stream exists with two entries a consumer group has
 	// read but not acknowledged: 2 pending (in-flight) work.
@@ -642,6 +633,29 @@ func TestRecoveryPendingBacklogWarning(t *testing.T) {
 	if !strings.Contains(out, "Changes made: NONE") {
 		t.Errorf("dry-run with the warning must still change nothing:\n%s", out)
 	}
+}
+
+// cleanupStreams deletes the given stream keys after the test. It dials its
+// own connection inside the cleanup: a test's deferred client.Close runs
+// BEFORE t.Cleanup callbacks (Go testing runs the function's defers first),
+// so a cleanup that reused the test client would fail with "client is
+// closed" and silently leak the streams — invisible in CI, whose containers
+// are discarded. Cleanup failures are loud (t.Errorf), so a future leak
+// fails the test.
+func cleanupStreams(t *testing.T, url string, names ...string) {
+	t.Helper()
+	t.Cleanup(func() {
+		opts, err := redis.ParseURL(url)
+		if err != nil {
+			t.Errorf("cleanup: parse redis url: %v", err)
+			return
+		}
+		c := redis.NewClient(opts)
+		defer c.Close()
+		if err := c.Del(context.Background(), names...).Err(); err != nil {
+			t.Errorf("cleanup: delete %v: %v", names, err)
+		}
+	})
 }
 
 // dialRedis opens a go-redis client against the test instance.

@@ -40,12 +40,18 @@ func TestRecoveryLoopEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer conn.Close()
+	// Close via t.Cleanup, registered BEFORE the fixture's delete cleanups:
+	// cleanups run last-added first, so the fixture deletes its queues while
+	// the channel is still open, then the connection closes. A `defer` would
+	// close the channel first and every fixture cleanup would fail silently,
+	// leaking queues on every test run (invisible in CI, whose containers
+	// are discarded).
+	t.Cleanup(func() { _ = conn.Close() })
 	ch, err := conn.Channel()
 	if err != nil {
 		t.Fatalf("channel: %v", err)
 	}
-	defer ch.Close()
+	t.Cleanup(func() { _ = ch.Close() })
 
 	f := newRecoveryFixture(t, ch)
 	f.deadLetter(t, ch, []amqp.Publishing{
@@ -187,12 +193,12 @@ func TestRecoveryLoopMissingDestination(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer conn.Close()
+	t.Cleanup(func() { _ = conn.Close() })
 	ch, err := conn.Channel()
 	if err != nil {
 		t.Fatalf("channel: %v", err)
 	}
-	defer ch.Close()
+	t.Cleanup(func() { _ = ch.Close() })
 
 	// One failing message dead-lettered into the DLQ.
 	f := newRecoveryFixture(t, ch)
@@ -283,12 +289,12 @@ func TestRecoveryLoopPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer conn.Close()
+	t.Cleanup(func() { _ = conn.Close() })
 	ch, err := conn.Channel()
 	if err != nil {
 		t.Fatalf("channel: %v", err)
 	}
-	defer ch.Close()
+	t.Cleanup(func() { _ = ch.Close() })
 
 	// Two failing messages: one plain (REQUIRES_FIX by the classifier), one
 	// carrying an event type the policy marks DO_NOT_REPLAY.
@@ -399,12 +405,12 @@ func TestReplayMissingDestinationLive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer conn.Close()
+	t.Cleanup(func() { _ = conn.Close() })
 	ch, err := conn.Channel()
 	if err != nil {
 		t.Fatalf("channel: %v", err)
 	}
-	defer ch.Close()
+	t.Cleanup(func() { _ = ch.Close() })
 
 	// One failing message with an explicit message-id so the CLI can address
 	// it by a known ID.
@@ -465,7 +471,11 @@ func newRecoveryFixture(t *testing.T, ch *amqp.Channel) *recoveryFixture {
 	if err := ch.ExchangeDeclare(f.dlx, "direct", true, false, false, false, nil); err != nil {
 		t.Fatalf("declare dlx: %v", err)
 	}
-	t.Cleanup(func() { _ = ch.ExchangeDelete(f.dlx, false, false) })
+	t.Cleanup(func() {
+		if err := ch.ExchangeDelete(f.dlx, false, false); err != nil {
+			t.Errorf("cleanup: delete exchange %s: %v", f.dlx, err)
+		}
+	})
 
 	if _, err := ch.QueueDeclare(f.dlq, true, false, false, false, nil); err != nil {
 		t.Fatalf("declare dlq: %v", err)
@@ -473,7 +483,11 @@ func newRecoveryFixture(t *testing.T, ch *amqp.Channel) *recoveryFixture {
 	if err := ch.QueueBind(f.dlq, f.source, f.dlx, false, nil); err != nil {
 		t.Fatalf("bind dlq: %v", err)
 	}
-	t.Cleanup(func() { _, _ = ch.QueueDelete(f.dlq, false, false, false) })
+	t.Cleanup(func() {
+		if _, err := ch.QueueDelete(f.dlq, false, false, false); err != nil {
+			t.Errorf("cleanup: delete queue %s: %v", f.dlq, err)
+		}
+	})
 
 	if _, err := ch.QueueDeclare(f.source, true, false, false, false, amqp.Table{
 		"x-dead-letter-exchange":    f.dlx,
@@ -481,7 +495,11 @@ func newRecoveryFixture(t *testing.T, ch *amqp.Channel) *recoveryFixture {
 	}); err != nil {
 		t.Fatalf("declare source: %v", err)
 	}
-	t.Cleanup(func() { _, _ = ch.QueueDelete(f.source, false, false, false) })
+	t.Cleanup(func() {
+		if _, err := ch.QueueDelete(f.source, false, false, false); err != nil {
+			t.Errorf("cleanup: delete queue %s: %v", f.source, err)
+		}
+	})
 	return f
 }
 
