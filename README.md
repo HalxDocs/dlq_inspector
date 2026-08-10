@@ -26,6 +26,14 @@ audit trail. Think `htop` or `kubectl`, but for failed asynchronous work.
 | Redis Streams | ✅ Supported — same workflow, same recovery engine, conformance-tested live |
 | Kafka, SQS | Planned |
 
+## Downloads
+
+[![GitHub all releases](https://img.shields.io/github/downloads/HalxDocs/dlq_inspector/total)](https://github.com/HalxDocs/dlq_inspector/releases)
+[![GitHub latest release](https://img.shields.io/github/downloads/HalxDocs/dlq_inspector/latest/total)](https://github.com/HalxDocs/dlq_inspector/releases/latest)
+
+Live download counts from the [releases page](https://github.com/HalxDocs/dlq_inspector/releases) —
+six static binaries (macOS/Linux/Windows × amd64/arm64) plus a `checksums.txt` per release.
+
 ## Install
 
 **No Go required** — the release ships static binaries for macOS, Linux, and
