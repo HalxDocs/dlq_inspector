@@ -38,6 +38,9 @@ Workflow: Inspect -> Analyze -> Classify -> Plan -> Validate -> Dry-run -> Recov
 		Version: version,
 		// Do not dump the full usage text on runtime errors.
 		SilenceUsage: true,
+		// Errors are printed by cmd/dlq/main, which also maps
+		// ExitCodeError (self-update --check) to its process exit code.
+		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			switch opts.Output {
 			case "text", "json", "jsonl":
@@ -68,6 +71,7 @@ Workflow: Inspect -> Analyze -> Classify -> Plan -> Validate -> Dry-run -> Recov
 		newRecoverCmd(opts),
 		newRollbackCmd(opts),
 		newPolicyCmd(opts),
+		newSelfUpdateCmd(version, opts),
 	)
 
 	return root

@@ -290,6 +290,33 @@ dlq policy apply policy.yaml --profile prod
 
 ## Misc
 
+### `dlq self-update`
+
+Check for and install the latest dlq release from GitHub. Fetches the release
+archive for your platform plus its `checksums.txt`, verifies the archive's
+sha256 against `checksums.txt` **before** anything is unpacked or replaced (a
+mismatch or a missing checksum refuses the update), then swaps the running
+binary in — atomically on Linux/macOS, and after dlq exits on Windows.
+
+Without `--confirm` this only checks and changes nothing. `--check` is the
+scriptable form and needs no config or broker:
+
+```bash
+dlq self-update                          # check and report (no changes)
+dlq self-update --check                  # exit 0 up to date, 1 update, 2 failed
+dlq self-update --confirm --yes          # download, verify, install
+dlq self-update --version v1.2.3 --confirm
+```
+
+| Flag | Meaning |
+|------|---------|
+| `--check` | Check and exit: 0 = up to date, 1 = update available, 2 = check failed |
+| `--confirm` | Download, verify, and install the update |
+| `--yes` | Skip the interactive confirmation prompt |
+| `--force` | Install even when already at the requested version |
+| `--version <tag>` | Update to a specific release tag (e.g. `v1.2.3`) instead of the latest |
+| `--github-token <token>` | GitHub token for higher API rate limits (default `$GITHUB_TOKEN`) |
+
 ### `dlq version`
 
 Print version, commit, and build time:

@@ -38,6 +38,14 @@ Or download the static binary for your platform from a
 [release](https://github.com/HalxDocs/dlq_inspector/releases) — no runtime
 dependencies, no cgo.
 
+Upgrade an existing install (downloads the release archive for your platform,
+verifies it against the release `checksums.txt`, then swaps the binary):
+
+```bash
+dlq self-update --check      # is there a newer release? (exit 0/1/2)
+dlq self-update --confirm    # download, verify, and install it
+```
+
 ## Quickstart
 
 Point the tool at your broker once, then work a real DLQ end to end:
