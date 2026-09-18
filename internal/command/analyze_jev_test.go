@@ -83,3 +83,27 @@ func TestAnalyzeWithJevWithoutKeyFallsBack(t *testing.T) {
 		t.Errorf("rules fallback should keep INVESTIGATE:\n%s", out)
 	}
 }
+
+func TestAnalyzeWithJevCustomKeyEnv(t *testing.T) {
+	hits := 0
+	srv := jevMockServer(t, "replayable", 0.93, &hits)
+	defer srv.Close()
+	// Default key absent, per-env key present: BYOK per environment.
+	t.Setenv(jev.APIKeyEnv, "")
+	t.Setenv("TYPESAFE_PROD_KEY", "prod-key")
+
+	cfgPath, _ := replayTestConfig(t)
+	withFakeBroker(t, &fakeBroker{msgs: map[string][]message.Message{"orders-dlq": analyzeFixture()}})
+
+	out, err := runCommand(t, "analyze", "--config", cfgPath,
+		"--with-jev", "--jev-endpoint", srv.URL, "--jev-api-key-env", "TYPESAFE_PROD_KEY")
+	if err != nil {
+		t.Fatalf("analyze --with-jev custom key env: %v\n%s", err, out)
+	}
+	if hits != 1 {
+		t.Errorf("jev calls = %d, want 1", hits)
+	}
+	if !strings.Contains(out, "jev 1/1") {
+		t.Errorf("output missing jev marker:\n%s", out)
+	}
+}

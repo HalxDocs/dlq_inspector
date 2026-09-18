@@ -121,6 +121,10 @@ GROUP 3 -- Duplicate event         29 msgs ( 6.0%)  DO_NOT_REPLAY
 | `--jev-endpoint <url>` | Jev API endpoint (for gateways/mocks) |
 | `--jev-max-calls <n>` | Maximum Jev API calls per run, spend guard (default 50) |
 
+BYOK: the key comes from the env var named by `--jev-api-key-env`
+(default `TYPESAFE_API_KEY`) — e.g. `--jev-api-key-env TYPESAFE_PROD_KEY`
+for per-environment keys. The value is never flagged, stored, or logged.
+
 A profile-bound [policy](#dlq-policy) can override classifications.
 
 Jev assist is opt-in and metadata-only: it sends error text, retry counts,
@@ -157,6 +161,7 @@ dlq plan orders-dlq --group <group-id> --output-file recovery.json
 | `--jev-model <id>` | `jev-latest` | Jev model ID |
 | `--jev-endpoint <url>` | TypeSafe API | Jev API endpoint |
 | `--jev-max-calls <n>` | 50 | Maximum Jev API calls per run |
+| `--jev-api-key-env <var>` | `TYPESAFE_API_KEY` | Env var holding the Jev API key (BYOK) |
 
 Jev-resolved exclusions are recorded on the plan with their reason, and plan
 audit entries carry a `[jev: N calls]` suffix when Jev was consulted.

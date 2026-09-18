@@ -37,6 +37,7 @@ type jevFlags struct {
 	model     string
 	endpoint  string
 	maxCalls  int
+	apiKeyEnv string
 }
 
 func (f *jevFlags) register(cmd *cobra.Command) {
@@ -46,6 +47,15 @@ func (f *jevFlags) register(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&f.model, "jev-model", jev.DefaultModel, "Jev model ID (pin a version for tuned thresholds)")
 	cmd.Flags().StringVar(&f.endpoint, "jev-endpoint", jev.DefaultEndpoint, "Jev API endpoint (for gateways/mocks)")
 	cmd.Flags().IntVar(&f.maxCalls, "jev-max-calls", 50, "maximum Jev API calls per run (spend guard)")
+	cmd.Flags().StringVar(&f.apiKeyEnv, "jev-api-key-env", jev.APIKeyEnv, "env var holding the Jev API key (BYOK: key value never stored or flagged)")
+}
+
+// keyEnvName resolves which env var holds the key, defaulting to TYPESAFE_API_KEY.
+func (f *jevFlags) keyEnvName() string {
+	if f.apiKeyEnv != "" {
+		return f.apiKeyEnv
+	}
+	return jev.APIKeyEnv
 }
 
 // buildJevAssessor returns a configured assessor, or nil when Jev is off or
@@ -55,9 +65,10 @@ func (f *jevFlags) buildJevAssessor(cmd *cobra.Command) *recovery.JevAssessor {
 	if !f.withJev {
 		return nil
 	}
-	key := os.Getenv(jev.APIKeyEnv)
+	envName := f.keyEnvName()
+	key := os.Getenv(envName)
 	if key == "" {
-		fmt.Fprintf(cmd.ErrOrStderr(), "warning: --with-jev without %s: falling back to rules\n", jev.APIKeyEnv)
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: --with-jev without %s set: falling back to rules\n", envName)
 		return nil
 	}
 	threshold := f.threshold
