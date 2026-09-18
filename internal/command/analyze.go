@@ -2,12 +2,14 @@ package command
 
 import (
 	"fmt"
+	"os"
 	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/HalxDocs/dlq_inspector/internal/broker"
+	"github.com/HalxDocs/dlq_inspector/internal/jev"
 	"github.com/HalxDocs/dlq_inspector/internal/recovery"
 )
 
@@ -17,10 +19,66 @@ type analyzeResult struct {
 	Total       int                     `json:"total"`
 	GeneratedAt time.Time               `json:"generated_at"`
 	Groups      []recovery.FailureGroup `json:"groups"`
+	Jev         *jevStats               `json:"jev,omitempty"`
+}
+
+// jevStats summarizes one Jev-assisted run for JSON consumers.
+type jevStats struct {
+	Calls   int `json:"calls"`
+	Cached  int `json:"cached"`
+	Decided int `json:"decided"`
+}
+
+// jevFlags carries the dlq analyze/plan Jev assist options.
+type jevFlags struct {
+	withJev   bool
+	all       bool
+	threshold float64
+	model     string
+	endpoint  string
+	maxCalls  int
+}
+
+func (f *jevFlags) register(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&f.withJev, "with-jev", false, "resolve ambiguous classifications with Jev (needs TYPESAFE_API_KEY)")
+	cmd.Flags().BoolVar(&f.all, "jev-all", false, "consult Jev for every message, not just INVESTIGATE ones")
+	cmd.Flags().Float64Var(&f.threshold, "jev-threshold", jev.DefaultThreshold, "minimum Jev confidence to accept (0-1)")
+	cmd.Flags().StringVar(&f.model, "jev-model", jev.DefaultModel, "Jev model ID (pin a version for tuned thresholds)")
+	cmd.Flags().StringVar(&f.endpoint, "jev-endpoint", jev.DefaultEndpoint, "Jev API endpoint (for gateways/mocks)")
+	cmd.Flags().IntVar(&f.maxCalls, "jev-max-calls", 50, "maximum Jev API calls per run (spend guard)")
+}
+
+// buildJevAssessor returns a configured assessor, or nil when Jev is off or
+// unusable. A missing API key warns on stderr and falls back to rules —
+// analyze never fails just because Jev is unavailable.
+func (f *jevFlags) buildJevAssessor(cmd *cobra.Command) *recovery.JevAssessor {
+	if !f.withJev {
+		return nil
+	}
+	key := os.Getenv(jev.APIKeyEnv)
+	if key == "" {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: --with-jev without %s: falling back to rules\n", jev.APIKeyEnv)
+		return nil
+	}
+	threshold := f.threshold
+	if threshold <= 0 || threshold > 1 {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: --jev-threshold %.2f out of range, using %.2f\n", f.threshold, jev.DefaultThreshold)
+		threshold = jev.DefaultThreshold
+	}
+	return &recovery.JevAssessor{
+		Client:          jev.NewClient(key, f.model, f.endpoint),
+		Threshold:       threshold,
+		Cache:           jev.NewCache(),
+		MaxCalls:        f.maxCalls,
+		OnlyInvestigate: !f.all,
+	}
 }
 
 func newAnalyzeCmd(opts *GlobalOptions) *cobra.Command {
-	var limit int
+	var (
+		limit int
+		jf    jevFlags
+	)
 
 	cmd := &cobra.Command{
 		Use:   "analyze [queue]",
@@ -31,7 +89,12 @@ event type, and retry range, and carries a recovery recommendation
 (REPLAYABLE / REQUIRES_FIX / DO_NOT_REPLAY / INVESTIGATE).
 
 The queue defaults to the profile's default_queue. Analysis is read-only —
-no message is published, acked, or moved.`,
+no message is published, acked, or moved.
+
+With --with-jev, messages the rule-based classifier leaves as INVESTIGATE
+are resolved by Jev (metadata only: error text, retry counts, destinations —
+never payload bytes). Header duplicates and policy matches always win over
+Jev; low-confidence or failed Jev calls fall back to rules silently.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := commandContext(cmd.Context())
@@ -62,7 +125,9 @@ no message is published, acked, or moved.`,
 				return nil
 			}
 
-			groups := (recovery.Analyzer{Policy: pol}).Analyze(msgs)
+			assessor := jf.buildJevAssessor(cmd)
+			groups := (recovery.Analyzer{Policy: pol, Jev: assessor}).AnalyzeWithContext(ctx, msgs)
+			stats := summarizeJev(assessor, groups)
 
 			if opts.Output == "json" {
 				return writeJSON(cmd, analyzeResult{
@@ -70,23 +135,44 @@ no message is published, acked, or moved.`,
 					Total:       len(msgs),
 					GeneratedAt: time.Now().UTC(),
 					Groups:      groups,
+					Jev:         stats,
 				})
 			}
-			return renderAnalyze(cmd, queue, len(msgs), groups)
+			return renderAnalyze(cmd, queue, len(msgs), groups, stats)
 		},
 	}
 
 	cmd.Flags().IntVar(&limit, "limit", 1000, "maximum number of messages to analyze")
+	jf.register(cmd)
 	return cmd
 }
 
+func summarizeJev(a *recovery.JevAssessor, groups []recovery.FailureGroup) *jevStats {
+	if a == nil || !a.Enabled() {
+		return nil
+	}
+	decided := 0
+	for _, g := range groups {
+		decided += g.JevDecided
+	}
+	cached := 0
+	if a.Cache != nil {
+		cached = a.Cache.Hits()
+	}
+	return &jevStats{Calls: a.Calls(), Cached: cached, Decided: decided}
+}
+
 // renderAnalyze prints the summary line and one block per failure group.
-func renderAnalyze(cmd *cobra.Command, queue string, total int, groups []recovery.FailureGroup) error {
+func renderAnalyze(cmd *cobra.Command, queue string, total int, groups []recovery.FailureGroup, stats *jevStats) error {
 	fmt.Fprintf(cmd.OutOrStdout(), "%d messages analyzed in %s\n", total, queue)
 	for i, g := range groups {
 		fmt.Fprintf(cmd.OutOrStdout(), "\nGROUP %d -- %s [%s]\n", i+1, g.Label, g.ID)
 		fmt.Fprintf(cmd.OutOrStdout(), "%d messages - %.1f%%\n", g.Count, g.Percentage)
-		fmt.Fprintf(cmd.OutOrStdout(), "Recommendation: %s (confidence %.2f)\n", g.Recommendation, g.Confidence)
+		if g.JevDecided > 0 {
+			fmt.Fprintf(cmd.OutOrStdout(), "Recommendation: %s (confidence %.2f, jev %d/%d)\n", g.Recommendation, g.Confidence, g.JevDecided, g.Count)
+		} else {
+			fmt.Fprintf(cmd.OutOrStdout(), "Recommendation: %s (confidence %.2f)\n", g.Recommendation, g.Confidence)
+		}
 
 		tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
 		fmt.Fprintf(tw, "Signature:\t%s\n", g.Signature)
@@ -107,6 +193,9 @@ func renderAnalyze(cmd *cobra.Command, queue string, total int, groups []recover
 		if err := tw.Flush(); err != nil {
 			return err
 		}
+	}
+	if stats != nil {
+		fmt.Fprintf(cmd.OutOrStdout(), "\nJev: %d calls (%d cached), %d messages decided by jev\n", stats.Calls, stats.Cached, stats.Decided)
 	}
 	return nil
 }

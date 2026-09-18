@@ -1,6 +1,7 @@
 package recovery
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -47,6 +48,9 @@ type FailureGroup struct {
 	PayloadShape string
 	// Breakdown counts each classification within the group.
 	Breakdown map[Classification]int
+	// JevDecided counts messages whose classification came from Jev.
+	// Omitted when zero so rule-only output is byte-identical.
+	JevDecided int `json:"jev_decided,omitempty"`
 }
 
 // groupKey is the tuple that defines one failure group. Signature is the
@@ -65,10 +69,19 @@ type Analyzer struct {
 	// Policy, when set, is consulted for every message: a matching rule's
 	// action overrides the classifier inference for that message.
 	Policy *policy.Policy
+	// Jev, when non-nil and enabled, resolves classifications via
+	// ClassifyWithPolicyAndJev (header > policy > jev > rules). Nil means
+	// rule-based analysis with zero behavior change.
+	Jev *JevAssessor
 }
 
 // Analyze clusters msgs into FailureGroups ordered by size (largest first).
 func (a Analyzer) Analyze(msgs []message.Message) []FailureGroup {
+	return a.AnalyzeWithContext(context.Background(), msgs)
+}
+
+// AnalyzeWithContext is Analyze with a caller context for Jev calls.
+func (a Analyzer) AnalyzeWithContext(ctx context.Context, msgs []message.Message) []FailureGroup {
 	total := len(msgs)
 	if total == 0 {
 		return nil
@@ -82,8 +95,11 @@ func (a Analyzer) Analyze(msgs []message.Message) []FailureGroup {
 		first    time.Time
 		last     time.Time
 		shape    string
+		jevN     int
 	}
 	pol := a.Policy // captured before the accumulator shadows the receiver
+	assessor := a.Jev
+	useJev := assessor != nil && assessor.Enabled()
 	groups := make(map[groupKey]*acc)
 	for i := range msgs {
 		m := &msgs[i]
@@ -104,7 +120,15 @@ func (a Analyzer) Analyze(msgs []message.Message) []FailureGroup {
 		}
 		a.ids = append(a.ids, m.ID)
 
-		res := ClassifyWithPolicy(m, pol)
+		var res ClassificationResult
+		if useJev {
+			res = ClassifyWithPolicyAndJev(ctx, m, pol, assessor)
+		} else {
+			res = ClassifyWithPolicy(m, pol)
+		}
+		if res.Source == "jev" {
+			a.jevN++
+		}
 		a.classCnt[res.Classification]++
 		a.confSum[res.Classification] += res.Confidence
 
@@ -138,6 +162,7 @@ func (a Analyzer) Analyze(msgs []message.Message) []FailureGroup {
 			LastSeen:       a.last,
 			PayloadShape:   a.shape,
 			Breakdown:      a.classCnt,
+			JevDecided:     a.jevN,
 		}
 		out = append(out, g)
 	}
