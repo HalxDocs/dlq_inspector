@@ -33,6 +33,17 @@ type ClassificationResult struct {
 	Reason         string
 	Confidence     float64 // 0.0-1.0, best-effort
 	DuplicateOf    *string // set when a likely duplicate was found
+	// Source is "rules", "policy", or "jev" — which layer decided.
+	Source string
+	// SkipReason explains why Jev was not used (jev-disabled,
+	// policy-matched, below-threshold, jev-error, ...). Empty when
+	// Source == "jev".
+	SkipReason string
+	// JevModel is the versioned model ID that answered (e.g. jev-1.13.0).
+	JevModel string
+	// ReplayRisk is Jev's replay_risk score normalized to 0-1. Zero when
+	// the verdict did not come from Jev.
+	ReplayRisk float64
 }
 
 // Classify applies the rule-based v1 classifier to a single message.
@@ -53,7 +64,7 @@ type ClassificationResult struct {
 //     correction, not another attempt.
 //   - Missing or conflicting signals default to INVESTIGATE.
 func Classify(m *message.Message) ClassificationResult {
-	res := ClassificationResult{MessageID: m.ID}
+	res := ClassificationResult{MessageID: m.ID, Source: "rules"}
 
 	// Application-provided duplicate evidence: the producer marks the message
 	// as a duplicate of another event it already emitted. This is an explicit
@@ -155,6 +166,7 @@ func ClassifyWithPolicy(m *message.Message, p *policy.Policy) ClassificationResu
 	res.Classification = cls
 	res.Reason = fmt.Sprintf("policy rule %q: %s", rule.When, rule.Action)
 	res.Confidence = 0.9
+	res.Source = "policy"
 	return res
 }
 
