@@ -1,6 +1,7 @@
 package recovery
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -106,12 +107,21 @@ type PlanOptions struct {
 	// action overrides the classifier inference (e.g. a policy can mark a
 	// message DO_NOT_REPLAY and keep it out of the plan).
 	Policy *policy.Policy
+	// Jev, when non-nil and enabled, resolves classifications via
+	// ClassifyWithPolicyAndJev (header > policy > jev > rules). Nil means
+	// rule-based planning with zero behavior change.
+	Jev *JevAssessor
 }
 
 // BuildPlan turns a set of failed messages into a RecoveryPlan. Selection
 // follows the group filter (when given) and excludes DO_NOT_REPLAY messages
 // unless explicitly overridden.
 func BuildPlan(msgs []message.Message, opts PlanOptions) (*RecoveryPlan, error) {
+	return BuildPlanWithContext(context.Background(), msgs, opts)
+}
+
+// BuildPlanWithContext is BuildPlan with a caller context for Jev calls.
+func BuildPlanWithContext(ctx context.Context, msgs []message.Message, opts PlanOptions) (*RecoveryPlan, error) {
 	if len(msgs) == 0 {
 		return nil, errors.New("no messages to plan")
 	}
@@ -129,13 +139,19 @@ func BuildPlan(msgs []message.Message, opts PlanOptions) (*RecoveryPlan, error) 
 	var ids []string
 	var excluded []ExcludedMessage
 	firstSig := ""
+	useJev := opts.Jev != nil && opts.Jev.Enabled()
 	for i := range msgs {
 		m := &msgs[i]
 		sig := NormalizeSignature(m.FailureReason)
 		if opts.GroupID != "" && groupID(sig) != opts.GroupID {
 			continue
 		}
-		cls := ClassifyWithPolicy(m, opts.Policy)
+		var cls ClassificationResult
+		if useJev {
+			cls = ClassifyWithPolicyAndJev(ctx, m, opts.Policy, opts.Jev)
+		} else {
+			cls = ClassifyWithPolicy(m, opts.Policy)
+		}
 		if !opts.IncludeDoNotReplay && cls.Classification == DoNotReplay {
 			excluded = append(excluded, ExcludedMessage{
 				MessageID:      m.ID,

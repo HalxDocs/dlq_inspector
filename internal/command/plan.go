@@ -23,6 +23,7 @@ func newPlanCmd(opts *GlobalOptions) *cobra.Command {
 		limit              int
 		includeDoNotReplay bool
 		reason             string
+		jf                 jevFlags
 	)
 
 	cmd := &cobra.Command{
@@ -64,13 +65,15 @@ DO_NOT_REPLAY are excluded unless --include-do-not-replay is given.`,
 				return fmt.Errorf("no messages found in %q to plan", queue)
 			}
 
-			p, err := recovery.BuildPlan(msgs, recovery.PlanOptions{
+			assessor := jf.buildJevAssessor(cmd)
+			p, err := recovery.BuildPlanWithContext(ctx, msgs, recovery.PlanOptions{
 				Queue:              queue,
 				GroupID:            groupID,
 				Destination:        destination,
 				Limits:             recovery.PlanLimits{BatchSize: batchSize, RateLimit: rateLimit, Concurrency: concurrency},
 				IncludeDoNotReplay: includeDoNotReplay,
 				Policy:             pol,
+				Jev:                assessor,
 			})
 			if err != nil {
 				return err
@@ -85,6 +88,10 @@ DO_NOT_REPLAY are excluded unless --include-do-not-replay is given.`,
 				return err
 			}
 			defer store.Close()
+			auditReason := reason
+			if assessor != nil && assessor.Enabled() && assessor.Calls() > 0 {
+				auditReason = appendJevAuditSuffix(auditReason, assessor.Calls())
+			}
 			if err := store.Append(audit.Entry{
 				Timestamp:   p.CreatedAt,
 				Action:      audit.ActionPlan,
@@ -94,7 +101,7 @@ DO_NOT_REPLAY are excluded unless --include-do-not-replay is given.`,
 				Result:      "written",
 				Broker:      profile.Broker,
 				Profile:     effectiveProfileName(opts),
-				Reason:      reason,
+				Reason:      auditReason,
 			}); err != nil {
 				return fmt.Errorf("record plan in audit: %w", err)
 			}
@@ -102,6 +109,9 @@ DO_NOT_REPLAY are excluded unless --include-do-not-replay is given.`,
 			msg := fmt.Sprintf("Plan written: %s (%d messages selected)", output, len(p.MessageIDs))
 			if len(p.Excluded) > 0 {
 				msg += fmt.Sprintf(", %d excluded (left in DLQ)", len(p.Excluded))
+			}
+			if assessor != nil && assessor.Enabled() && assessor.Calls() > 0 {
+				msg += fmt.Sprintf(" [jev: %d calls]", assessor.Calls())
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), msg)
 			fmt.Fprintf(cmd.OutOrStdout(), "Plan ID: %s\n", p.ID)
@@ -119,7 +129,18 @@ DO_NOT_REPLAY are excluded unless --include-do-not-replay is given.`,
 	cmd.Flags().IntVar(&limit, "limit", 1000, "maximum number of messages to consider")
 	cmd.Flags().BoolVar(&includeDoNotReplay, "include-do-not-replay", false, "also select messages classified DO_NOT_REPLAY")
 	cmd.Flags().StringVar(&reason, "reason", "", "operator-provided reason, recorded in the audit trail")
+	jf.register(cmd)
 	return cmd
+}
+
+// appendJevAuditSuffix records Jev usage on a plan audit entry without a
+// schema change: the operator reason stays, with a machine-greppable suffix.
+func appendJevAuditSuffix(reason string, calls int) string {
+	suffix := fmt.Sprintf("[jev: %d calls]", calls)
+	if reason == "" {
+		return suffix
+	}
+	return reason + " " + suffix
 }
 
 // writePlanFile writes the plan as indented JSON for review and diffing.
