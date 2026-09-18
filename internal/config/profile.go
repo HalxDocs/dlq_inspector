@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+
+	"github.com/HalxDocs/dlq_inspector/internal/jev"
 )
 
 // Profile describes a named broker connection in the config file. Secrets are
@@ -22,6 +24,57 @@ type Profile struct {
 	// inspect/search output (e.g. "customer.email"). Revealed only with
 	// --show-sensitive.
 	SensitiveFields []string `yaml:"sensitive_fields,omitempty"`
+	// Jev, when non-nil with Enabled true, turns on Jev assist by default
+	// for dlq analyze/plan on this profile. Nil means classic rule-based
+	// behavior. Managed with `dlq jev enable|disable`; per-run
+	// --with-jev/--without-jev flags always override it.
+	Jev *JevSettings `yaml:"jev,omitempty"`
+}
+
+// JevSettings persists one profile's Jev assist preference. Only the key's
+// env var NAME is stored here — the key value itself always stays in the
+// environment (BYOK).
+type JevSettings struct {
+	Enabled   bool    `yaml:"enabled"`
+	All       bool    `yaml:"all,omitempty"`
+	Threshold float64 `yaml:"threshold,omitempty"`
+	Model     string  `yaml:"model,omitempty"`
+	Endpoint  string  `yaml:"endpoint,omitempty"`
+	MaxCalls  int     `yaml:"max_calls,omitempty"`
+	APIKeyEnv string  `yaml:"api_key_env,omitempty"`
+}
+
+// Effective returns the settings with defaults applied for every zero value.
+// Nil-safe: a nil receiver yields all defaults with Enabled false.
+func (s *JevSettings) Effective() JevSettings {
+	out := JevSettings{
+		Threshold: jev.DefaultThreshold,
+		Model:     jev.DefaultModel,
+		Endpoint:  jev.DefaultEndpoint,
+		MaxCalls:  jev.DefaultMaxCalls,
+		APIKeyEnv: jev.APIKeyEnv,
+	}
+	if s == nil {
+		return out
+	}
+	out.Enabled = s.Enabled
+	out.All = s.All
+	if s.Threshold > 0 {
+		out.Threshold = s.Threshold
+	}
+	if s.Model != "" {
+		out.Model = s.Model
+	}
+	if s.Endpoint != "" {
+		out.Endpoint = s.Endpoint
+	}
+	if s.MaxCalls > 0 {
+		out.MaxCalls = s.MaxCalls
+	}
+	if s.APIKeyEnv != "" {
+		out.APIKeyEnv = s.APIKeyEnv
+	}
+	return out
 }
 
 // ResolveURL returns the effective connection URL for the profile, preferring

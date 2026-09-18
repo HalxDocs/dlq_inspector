@@ -21,3 +21,7 @@ const APIKeyEnv = "TYPESAFE_API_KEY"
 // 70-500ms; anything slower is treated as unavailable and the caller falls
 // back to rules.
 const DefaultTimeoutSeconds = 10
+
+// DefaultMaxCalls caps Jev evaluations per CLI run (spend guard) unless the
+// caller sets its own budget.
+const DefaultMaxCalls = 50
