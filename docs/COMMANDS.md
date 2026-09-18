@@ -114,8 +114,21 @@ GROUP 3 -- Duplicate event         29 msgs ( 6.0%)  DO_NOT_REPLAY
 | Flag | Meaning |
 |------|---------|
 | `--limit <n>` | Maximum number of messages to analyze (default 1000) |
+| `--with-jev` | Resolve INVESTIGATE classifications with Jev (needs `TYPESAFE_API_KEY`) |
+| `--jev-all` | Consult Jev for every message, not just INVESTIGATE ones |
+| `--jev-threshold <f>` | Minimum Jev confidence to accept, 0-1 (default 0.70) |
+| `--jev-model <id>` | Jev model ID (default `jev-latest`; pin a version for tuned thresholds) |
+| `--jev-endpoint <url>` | Jev API endpoint (for gateways/mocks) |
+| `--jev-max-calls <n>` | Maximum Jev API calls per run, spend guard (default 50) |
 
 A profile-bound [policy](#dlq-policy) can override classifications.
+
+Jev assist is opt-in and metadata-only: it sends error text, retry counts,
+destinations, and signatures — never payload bytes. Precedence is
+`x-duplicate-of` header > policy > Jev > rules, and any Jev failure, timeout,
+or below-threshold verdict falls back to the rule-based result silently
+(a missing key only warns). Groups show `(jev x/y)` when Jev decided x of y
+messages, and `--output json` gains a `jev: {calls, cached, decided}` block.
 
 ### `dlq plan <queue>`
 
@@ -138,6 +151,15 @@ dlq plan orders-dlq --group <group-id> --output-file recovery.json
 | `--limit <n>` | 1000 | Maximum number of messages to consider |
 | `--include-do-not-replay` | false | Also select messages classified DO_NOT_REPLAY |
 | `--reason <text>` | — | Operator-provided reason, recorded in the audit trail |
+| `--with-jev` | false | Classify with Jev assist (same flags/thresholds as `analyze`) |
+| `--jev-all` | false | Consult Jev for every message, not just INVESTIGATE ones |
+| `--jev-threshold <f>` | 0.70 | Minimum Jev confidence to accept |
+| `--jev-model <id>` | `jev-latest` | Jev model ID |
+| `--jev-endpoint <url>` | TypeSafe API | Jev API endpoint |
+| `--jev-max-calls <n>` | 50 | Maximum Jev API calls per run |
+
+Jev-resolved exclusions are recorded on the plan with their reason, and plan
+audit entries carry a `[jev: N calls]` suffix when Jev was consulted.
 
 ### `dlq recover --plan <file>`
 

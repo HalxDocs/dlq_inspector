@@ -218,11 +218,18 @@ Signals, strongest first:
    duplicate. Always `DO_NOT_REPLAY`, outranks everything.
 2. A profile-bound policy rule whose condition and params match — overrides the
    inference (first match wins).
-3. The built-in rule-based classifier over failure text and retry count:
-   transient-sounding failures are replayable (unless already retried many
-   times), permanent-sounding ones require a fix, duplicate keywords block
-   replay, and missing or conflicting signals default to `INVESTIGATE` — the
-   honest default, never a forced guess.
+ 3. The built-in rule-based classifier over failure text and retry count:
+    transient-sounding failures are replayable (unless already retried many
+    times), permanent-sounding ones require a fix, duplicate keywords block
+    replay, and missing or conflicting signals default to `INVESTIGATE` — the
+    honest default, never a forced guess.
+ 4. **Jev assist (opt-in, `internal/jev` + `JevAssessor`).** With
+    `dlq analyze/plan --with-jev`, INVESTIGATE messages (or all messages with
+    `--jev-all`) are sent as metadata-only state (error text, retries,
+    destination, signature — never payload bytes) to TypeSafe's Jev model for
+    a Choice/Noul/Score verdict. Header duplicates and policy matches always
+    outrank Jev; sub-threshold or failed calls fall back to the rules. Results
+    are cached per run by state hash and recorded with the versioned model ID.
 
 ### Planner (`planner.go`)
 
