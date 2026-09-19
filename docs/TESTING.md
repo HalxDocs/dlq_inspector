@@ -431,6 +431,5 @@ artifacts, so release-config drift fails the workflow at commit time.
 ## 12. Screenshot gallery
 
 All captures from this guide, in order: `docs/screenshots/01-queues.png` …
-`13-redis-analyze.png`. Regenerate them by re-running the walkthrough and
-rendering the transcripts (the render script is a throwaway; the PNGs are
-committed as documentation).
+`13-redis-analyze.png`. `14-je
+...[truncated 447 chars]

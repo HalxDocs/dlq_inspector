@@ -18,6 +18,21 @@ share a cause, what is safe to replay, and what needs a fix first. Every mutatin
 operation flows through one safety pipeline, and everything it does lands in a local
 audit trail. Think `htop` or `kubectl`, but for failed asynchronous work.
 
+## Two ways to run
+
+**Classic (default)** — the built-in rule-based classifier. Fully offline, no key,
+no network. Messages it can't decide on are honestly labeled `INVESTIGATE` instead
+of guessed.
+
+**Jev assist (opt-in)** — ambiguous failures are resolved by [Jev](https://typesafe.ai)
+(TypeSafe AI's decision model: typed verdicts with calibrated confidence, no chat,
+no hallucinations). Your key, your bill, metadata only — error text, retry counts,
+destinations. Payload bytes never leave your machine.
+
+![dlq jev status](./docs/screenshots/16-jev-status-on.png)
+
+Switch between them anytime — [see below](#switching-between-classic-and-jev).
+
 ## Brokers
 
 | Broker | Status |
@@ -75,7 +90,7 @@ dlq self-update --check      # is there a newer release? (exit 0/1/2)
 dlq self-update --confirm    # download, verify, and install it
 ```
 
-## Quickstart
+## Quickstart (classic — no key needed)
 
 Want to *see* it work in the next ten minutes? [docs/TESTING.md](docs/TESTING.md) walks
 you through starting brokers, seeding a DLQ with failing messages, and driving the
@@ -126,6 +141,60 @@ dlq replay orders-dlq --id sha256:1a2b... --confirm
 dlq patch orders-dlq --id sha256:1a2b... --set customer_id=443   # diff first, then --confirm
 ```
 
+## Connect your API key — Jev assist (optional)
+
+Jev assist is **bring-your-own-key**: the key lives in your environment, is billed
+to your TypeSafe account, and is never stored, flagged, or printed by `dlq`
+(`dlq jev status` only ever shows *set* / *not set*).
+
+```bash
+# 1. Get a key from the TypeSafe dashboard
+#    https://console.typesafe.ai/settings/keys
+
+# 2. Export it (PowerShell: $env:TYPESAFE_API_KEY="ts_...")
+export TYPESAFE_API_KEY=ts_...
+
+# 3. Opt in for a profile — assist is now automatic for analyze and plan
+dlq jev enable --profile prod
+```
+
+![dlq jev enable](./docs/screenshots/15-jev-enable.png)
+
+```bash
+# 4. Verify, and see every profile's switch at a glance
+dlq jev status --profile prod
+dlq profiles list
+```
+
+![dlq profiles list](./docs/screenshots/17-profiles-jev.png)
+
+Per-environment keys work the same way — only the env var *name* is stored,
+never the value (same convention as `--url-env` for broker URLs):
+
+```bash
+export TYPESAFE_PROD_KEY=ts_...
+dlq jev enable --profile prod --api-key-env TYPESAFE_PROD_KEY
+```
+
+Key rules: env var only — there is deliberately no `--api-key` flag (it would
+leak through shell history and process listings) and no config-file field. If the
+key is unset at runtime, commands warn and fall back to the rule-based classifier
+instead of failing.
+
+### Switching between classic and Jev
+
+| I want to… | Run |
+|------------|-----|
+| Use Jev for one command | `dlq analyze orders-dlq --with-jev` |
+| Skip Jev for one command | `dlq analyze orders-dlq --without-jev` |
+| Turn Jev on for a profile | `dlq jev enable --profile prod` |
+| Turn Jev off for a profile | `dlq jev disable --profile prod` |
+| Check what's active | `dlq jev status --profile prod` |
+
+Precedence per run: `--without-jev` > `--with-jev` > profile setting. Either way,
+`x-duplicate-of` headers and policy rules always outrank Jev, and any Jev failure
+or below-threshold verdict silently keeps the rule-based result.
+
 ## Safety model
 
 DLQ Inspector never mutates a queue outside the shared safety pipeline:
@@ -144,13 +213,27 @@ DLQ Inspector never mutates a queue outside the shared safety pipeline:
 
 The classifier is honest by design: `INVESTIGATE` is the default when signals are
 missing or conflict, and teams can encode their own judgment as committed YAML
-[policies](docs/POLICIES.md) that override the defaults.
+[policies](docs/POLICIES.md) that override the defaults. Jev assist only ever
+*resolves* ambiguity inside this model — it cannot bypass a confirm, a policy, or
+duplicate evidence.
+
+## Screenshots
+
+Real terminal captures (unedited). The full set lives in [docs/screenshots](docs/screenshots/)
+— recovery walkthrough (`01`–`10`) plus Redis (`11`–`13`):
+
+| | |
+|---|---|
+| ![dlq analyze](docs/screenshots/03-analyze.png) | ![dlq jev status](docs/screenshots/14-jev-status-off.png) |
+| Classic analysis: grouped failures with recommendations | Fresh profile: Jev off, key not set |
+| ![dlq jev enable](docs/screenshots/15-jev-enable.png) | ![dlq profiles list](docs/screenshots/17-profiles-jev.png) |
+| Opting in: key stays in the env, settings on the profile | Every profile's Jev switch at a glance |
 
 ## Documentation
 
 - [docs/TESTING.md](docs/TESTING.md) — hands-on walkthrough and how to run the test suite
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — layered design, Broker contract, safety gate
-- [docs/COMMANDS.md](docs/COMMANDS.md) — full command reference
+- [docs/COMMANDS.md](docs/COMMANDS.md) — full command reference (incl. `dlq jev`)
 - [docs/POLICIES.md](docs/POLICIES.md) — recovery policy YAML grammar and CI usage
 - [docs/PLAN.md](docs/PLAN.md) — architecture rationale and the phased build plan
 
