@@ -114,7 +114,8 @@ GROUP 3 -- Duplicate event         29 msgs ( 6.0%)  DO_NOT_REPLAY
 | Flag | Meaning |
 |------|---------|
 | `--limit <n>` | Maximum number of messages to analyze (default 1000) |
-| `--with-jev` | Resolve INVESTIGATE classifications with Jev (needs `TYPESAFE_API_KEY`) |
+| `--with-jev` | Use Jev assist for this run (overrides profile) |
+| `--without-jev` | Force rule-based classification for this run (overrides profile) |
 | `--jev-all` | Consult Jev for every message, not just INVESTIGATE ones |
 | `--jev-threshold <f>` | Minimum Jev confidence to accept, 0-1 (default 0.70) |
 | `--jev-model <id>` | Jev model ID (default `jev-latest`; pin a version for tuned thresholds) |
@@ -155,7 +156,8 @@ dlq plan orders-dlq --group <group-id> --output-file recovery.json
 | `--limit <n>` | 1000 | Maximum number of messages to consider |
 | `--include-do-not-replay` | false | Also select messages classified DO_NOT_REPLAY |
 | `--reason <text>` | — | Operator-provided reason, recorded in the audit trail |
-| `--with-jev` | false | Classify with Jev assist (same flags/thresholds as `analyze`) |
+| `--with-jev` | false | Use Jev assist for this run (overrides profile) |
+| `--without-jev` | false | Force rule-based planning for this run (overrides profile) |
 | `--jev-all` | false | Consult Jev for every message, not just INVESTIGATE ones |
 | `--jev-threshold <f>` | 0.70 | Minimum Jev confidence to accept |
 | `--jev-model <id>` | `jev-latest` | Jev model ID |
@@ -312,6 +314,40 @@ analyses and plans honor its rules. A policy that does not parse is refused.
 ```bash
 dlq policy apply policy.yaml --profile prod
 ```
+
+---
+
+## Jev assist (opt-in AI classification)
+
+Two starting paths, one switch to move between them:
+
+**Path A — classic (default).** Do nothing: `analyze` and `plan` classify with
+the built-in rules, make no network calls, and need no key. When messages are
+left as `INVESTIGATE`, the output suggests enabling assist.
+
+**Path B — Jev assist.** Bring your own key and opt in per profile:
+
+```bash
+export TYPESAFE_API_KEY=ts_...          # PowerShell: $env:TYPESAFE_API_KEY="ts_..."
+dlq jev enable --profile prod           # assist is now automatic for prod
+dlq analyze orders-dlq                  # INVESTIGATE resolved by Jev
+dlq plan orders-dlq --group <group-id> --output-file recovery.json
+```
+
+**Switching midway.** Opt out for good with `dlq jev disable` (tuning is kept,
+so `enable` restores it), or for one run only without touching the profile:
+
+```bash
+dlq jev disable --profile prod          # back to rule-based
+dlq analyze orders-dlq --without-jev    # one-run opt-out (profile stays on)
+dlq analyze orders-dlq --with-jev       # one-run opt-in (profile stays off)
+dlq jev status --profile prod           # enabled? tuning? key set?
+```
+
+Precedence per run: `--without-jev` > `--with-jev` > profile setting.
+`x-duplicate-of` headers and policy rules always outrank Jev, and any Jev
+failure or below-threshold verdict falls back to rules. `dlq profiles list`
+shows each profile's switch (`JEV on/off`).
 
 ---
 
