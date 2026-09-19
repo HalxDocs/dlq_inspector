@@ -80,6 +80,8 @@ internal/broker/        the Broker contract, registry, shared conformance suite
 internal/broker/rabbitmq/    RabbitMQ adapter (AMQP + management API)
 internal/broker/redisstream/ Redis Streams adapter (go-redis/v9)
 internal/recovery/      analyzer, classifier, planner, validator, executor, rollback
+internal/jev/           optional Jev assist: API client, metadata-only state,
+                        response mapper, per-run cache (BYOK, never default-on)
 internal/safety/        the shared single-message safety gate
 internal/message/       the normalized message model + formatting
 internal/search/        broker-agnostic message filtering
