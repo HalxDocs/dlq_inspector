@@ -48,8 +48,11 @@ type ClassificationResult struct {
 
 // Classify applies the rule-based v1 classifier to a single message.
 //
-// The rules are deliberately conservative and code-defined (no user policy
-// DSL yet — that arrives with the policy engine):
+// The rules are deliberately conservative and code-defined. They are the
+// baseline of the precedence chain: an x-duplicate-of header or a matching
+// policy rule (see ClassifyWithPolicy) outranks this inference, and an
+// enabled Jev assessor (see ClassifyWithPolicyAndJev) may resolve what the
+// rules leave as INVESTIGATE.
 //
 //   - An explicit application header (x-duplicate-of) marking the message as
 //     a duplicate is DO_NOT_REPLAY — the strongest signal, because the
