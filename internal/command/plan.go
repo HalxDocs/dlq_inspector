@@ -35,7 +35,9 @@ written as JSON for review and diffing — nothing is executed here.
 
 By default every replayable message is selected. Use --group <id> (an ID
 shown by dlq analyze) to plan one failure group. Messages classified
-DO_NOT_REPLAY are excluded unless --include-do-not-replay is given.`,
+DO_NOT_REPLAY are excluded unless --include-do-not-replay is given.
+Jev assist follows the profile ('dlq jev enable') unless --with-jev or
+--without-jev overrides it for this run.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := commandContext(cmd.Context())
@@ -65,7 +67,7 @@ DO_NOT_REPLAY are excluded unless --include-do-not-replay is given.`,
 				return fmt.Errorf("no messages found in %q to plan", queue)
 			}
 
-			assessor := jf.buildJevAssessor(cmd)
+			assessor, _ := jf.resolveJev(cmd, profile)
 			p, err := recovery.BuildPlanWithContext(ctx, msgs, recovery.PlanOptions{
 				Queue:              queue,
 				GroupID:            groupID,

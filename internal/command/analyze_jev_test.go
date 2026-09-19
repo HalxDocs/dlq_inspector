@@ -6,9 +6,23 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/HalxDocs/dlq_inspector/internal/config"
 	"github.com/HalxDocs/dlq_inspector/internal/jev"
 	"github.com/HalxDocs/dlq_inspector/internal/message"
 )
+
+// enableJevInConfig flips Jev on for the dev profile of the test config.
+func enableJevInConfig(t *testing.T, cfgPath string) {
+	t.Helper()
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Profiles["dev"].Jev = &config.JevSettings{Enabled: true}
+	if err := config.Save(cfgPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func jevMockServer(t *testing.T, choice string, conf float64, hits *int) *httptest.Server {
 	t.Helper()
@@ -81,6 +95,95 @@ func TestAnalyzeWithJevWithoutKeyFallsBack(t *testing.T) {
 	}
 	if !strings.Contains(out, "Recommendation: INVESTIGATE") {
 		t.Errorf("rules fallback should keep INVESTIGATE:\n%s", out)
+	}
+}
+
+func TestAnalyzeProfileEnabledAutoAssists(t *testing.T) {
+	hits := 0
+	srv := jevMockServer(t, "replayable", 0.93, &hits)
+	defer srv.Close()
+	t.Setenv(jev.APIKeyEnv, "test-key")
+
+	cfgPath, _ := replayTestConfig(t)
+	enableJevInConfig(t, cfgPath)
+	// Point the enabled profile at the mock server.
+	cfg, _ := config.Load(cfgPath)
+	cfg.Profiles["dev"].Jev.Endpoint = srv.URL
+	if err := config.Save(cfgPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	withFakeBroker(t, &fakeBroker{msgs: map[string][]message.Message{"orders-dlq": analyzeFixture()}})
+
+	// No flags: the profile default drives Jev.
+	out, err := runCommand(t, "analyze", "--config", cfgPath)
+	if err != nil {
+		t.Fatalf("analyze with enabled profile: %v\n%s", err, out)
+	}
+	if hits != 1 || !strings.Contains(out, "jev 1/1") {
+		t.Errorf("profile Jev not honored (hits=%d):\n%s", hits, out)
+	}
+}
+
+func TestAnalyzeWithoutJevOverridesProfile(t *testing.T) {
+	t.Setenv(jev.APIKeyEnv, "test-key")
+	cfgPath, _ := replayTestConfig(t)
+	enableJevInConfig(t, cfgPath)
+	withFakeBroker(t, &fakeBroker{msgs: map[string][]message.Message{"orders-dlq": analyzeFixture()}})
+
+	out, err := runCommand(t, "analyze", "--config", cfgPath, "--without-jev")
+	if err != nil {
+		t.Fatalf("analyze --without-jev: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "jev 1/1") || strings.Contains(out, "Jev:") {
+		t.Errorf("--without-jev did not opt out:\n%s", out)
+	}
+	if strings.Contains(out, "Tip:") {
+		t.Errorf("explicit opt-out must not nag:\n%s", out)
+	}
+	if !strings.Contains(out, "Recommendation: INVESTIGATE") {
+		t.Errorf("rule-based fallback lost:\n%s", out)
+	}
+}
+
+func TestAnalyzeHintWhenInvestigateAndJevOff(t *testing.T) {
+	t.Setenv(jev.APIKeyEnv, "")
+	cfgPath, _ := replayTestConfig(t)
+	withFakeBroker(t, &fakeBroker{msgs: map[string][]message.Message{"orders-dlq": analyzeFixture()}})
+
+	out, err := runCommand(t, "analyze", "--config", cfgPath)
+	if err != nil {
+		t.Fatalf("analyze: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Tip:") || !strings.Contains(out, "dlq jev enable") {
+		t.Errorf("want enable hint:\n%s", out)
+	}
+
+	// JSON mode stays machine-clean: no hint.
+	out, err = runCommand(t, "analyze", "--config", cfgPath, "--output", "json")
+	if err != nil {
+		t.Fatalf("analyze json: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "Tip:") {
+		t.Errorf("hint leaked into JSON:\n%s", out)
+	}
+}
+
+func TestProfilesListShowsJev(t *testing.T) {
+	cfgPath, _ := replayTestConfig(t)
+	out, err := runCommand(t, "profiles", "list", "--config", cfgPath)
+	if err != nil {
+		t.Fatalf("profiles list: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "JEV") || !strings.Contains(out, "off") {
+		t.Errorf("list missing JEV column:\n%s", out)
+	}
+	enableJevInConfig(t, cfgPath)
+	out, err = runCommand(t, "profiles", "list", "--config", cfgPath)
+	if err != nil {
+		t.Fatalf("profiles list: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "on") {
+		t.Errorf("list missing enabled state:\n%s", out)
 	}
 }
 

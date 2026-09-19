@@ -49,14 +49,14 @@ func newProfilesListCmd(opts *GlobalOptions) *cobra.Command {
 			}
 
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
-			fmt.Fprintln(tw, "NAME\tBROKER\tDEFAULT QUEUE\tURL SOURCE")
+			fmt.Fprintln(tw, "NAME\tBROKER\tDEFAULT QUEUE\tURL SOURCE\tJEV")
 			for _, name := range names {
 				p := cfg.Profiles[name]
 				marker := ""
 				if name == cfg.DefaultProfile {
 					marker = " (default)"
 				}
-				fmt.Fprintf(tw, "%s%s\t%s\t%s\t%s\n", name, marker, p.Broker, p.DefaultQueue, urlSource(p))
+				fmt.Fprintf(tw, "%s%s\t%s\t%s\t%s\t%s\n", name, marker, p.Broker, p.DefaultQueue, urlSource(p), jevState(p))
 			}
 			return tw.Flush()
 		},
@@ -79,5 +79,14 @@ func profileJSON(name string, isDefault bool, p *config.Profile) map[string]any 
 		"broker":        p.Broker,
 		"default_queue": p.DefaultQueue,
 		"url_source":    urlSource(p),
+		"jev_enabled":   p.Jev.Effective().Enabled,
 	}
+}
+
+// jevState renders a profile's Jev assist switch for listings.
+func jevState(p *config.Profile) string {
+	if p.Jev.Effective().Enabled {
+		return "on"
+	}
+	return "off"
 }
