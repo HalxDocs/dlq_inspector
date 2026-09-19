@@ -71,6 +71,7 @@ Workflow: Inspect -> Analyze -> Classify -> Plan -> Validate -> Dry-run -> Recov
 		newRecoverCmd(opts),
 		newRollbackCmd(opts),
 		newPolicyCmd(opts),
+		newJevCmd(opts),
 		newSelfUpdateCmd(version, opts),
 	)
 
