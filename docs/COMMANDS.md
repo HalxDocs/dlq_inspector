@@ -45,8 +45,8 @@ Redis Streams: `dlq connect redisstream --url-env REDIS_URL --default-queue orde
 
 ### `dlq profiles list`
 
-List saved profiles (name, broker, default queue, URL source) without printing
-secrets.
+List saved profiles (name, broker, default queue, URL source, Jev switch) without
+printing secrets.
 
 ---
 
@@ -105,10 +105,14 @@ Group failures by normalized signature (error text, event type, destination, ret
 bucket) and classify each group:
 
 ```text
-482 messages analyzed
-GROUP 1 -- Payment timeout        301 msgs (62.4%)  REPLAYABLE
-GROUP 2 -- Invalid customer_id     97 msgs (20.1%)  REQUIRES_FIX
-GROUP 3 -- Duplicate event         29 msgs ( 6.0%)  DO_NOT_REPLAY
+6 messages analyzed in orders-dlq
+
+GROUP 1 -- Timeout connecting to [8c06e1f5]
+3 messages - 50.0%
+Recommendation: REPLAYABLE (confidence 0.80)
+Signature:      timeout connecting to {ip}:{port}
+Destination:    orders
+Retries:        1-2
 ```
 
 | Flag | Meaning |
@@ -290,7 +294,8 @@ override the classifier's inference for matching messages (`dlq analyze` and
 rules:
   - when: error == payment_timeout
     action: replay
-    max_retries: 3
+    params:
+      max_retries: 3
   - when: event_type == order.cancelled
     action: do_not_replay
 ```
