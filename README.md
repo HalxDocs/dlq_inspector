@@ -5,9 +5,6 @@
 A local-first CLI for inspecting, analyzing, classifying, and **safely** recovering
 failed messages from dead-letter queues.
 
-Part of the backend toolkit: **Reqit** (build/test APIs) · **Barrage** (load testing) ·
-**DLQ Inspector** (failure investigation + safe recovery).
-
 ```text
 Inspect -> Analyze -> Classify -> Plan -> Validate -> Dry-run -> Recover -> Audit
 ```
