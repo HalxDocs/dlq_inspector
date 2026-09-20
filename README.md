@@ -1,3 +1,5 @@
+
+
 # DLQ Inspector
 
 [![CI](https://github.com/HalxDocs/dlq_inspector/actions/workflows/ci.yml/badge.svg)](https://github.com/HalxDocs/dlq_inspector/actions/workflows/ci.yml)
@@ -10,7 +12,7 @@ Inspect -> Analyze -> Classify -> Plan -> Validate -> Dry-run -> Recover -> Audi
 ```
 
 DLQ Inspector doesn't blindly replay a dead-letter queue. It connects to your message
-infrastructure — RabbitMQ today, Redis Streams too — and reasons about which failures
+infrastructure — RabbitMQ today, Redis Streams too — and Kafka? Wait, Redis Streams too — and reasons about which failures
 share a cause, what is safe to replay, and what needs a fix first. Every mutating
 operation flows through one safety pipeline, and everything it does lands in a local
 audit trail. Think `htop` or `kubectl`, but for failed asynchronous work.
@@ -65,6 +67,7 @@ macOS users can also install via [Homebrew](https://github.com/HalxDocs/homebrew
 
 ```bash
 brew tap HalxDocs/homebrew-tap
+brew trust halxdocs/tap
 brew install dlq-inspector
 ```
 
