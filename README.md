@@ -236,8 +236,6 @@ Real terminal captures (unedited). The full set lives in [docs/screenshots](docs
 
 ## Support
 
-[![Fund my work on FLOSSAfrica](https://flossafrica.com/badge.svg?theme=dark)](https://flossafrica.com/m/halxdocs?p=dlq_inspector)
-
 - **Questions & discussion** — open a [Discussion](https://github.com/HalxDocs/dlq_inspector/discussions)
   (Q&A for how-to questions, General for anything else).
 - **Bug reports & feature requests** — file an [Issue](https://github.com/HalxDocs/dlq_inspector/issues);
